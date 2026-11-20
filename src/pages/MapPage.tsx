@@ -27,7 +27,7 @@ export function MapPage() {
         <div>
           <span className="eyebrow">FOLLOW YOUR JOURNEY</span>
           <h1>Live bus map</h1>
-          <p>Find active buses and designated pickup points.</p>
+          <p>Find an active bus and choose your pickup position.</p>
         </div>
         <span className="region-label">
           <MapPin size={16} /> Mamburao, PH
@@ -96,7 +96,6 @@ export function MapPage() {
             ...feed,
             trips,
             locations: feed.locations.filter((l) => trips.some((t) => t.id === l.trip_id)),
-            pickup_points: feed.pickup_points.filter((p) => !route || p.route_id === route),
           }}
           selected={selected}
           onSelect={(id) => setParams({ trip: id })}
@@ -108,7 +107,7 @@ export function MapPage() {
         <BusDetails
           key={selected}
           tripId={selected}
-          initialPoint={params.get('point') || ''}
+          initialPickup={params.get('pickup') === '1'}
           onClose={() => setParams({})}
         />
       )}

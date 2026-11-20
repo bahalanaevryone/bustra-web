@@ -124,9 +124,9 @@ test('live pickup intent is preserved through guest login', async ({ page }) => 
       },
     }),
   )
-  await page.goto('/map?trip=trip&point=stop')
+  await page.goto('/map?trip=trip&pickup=1')
   await page.getByRole('button', { name: 'Log in to request pickup' }).click()
-  await expect(page).toHaveURL(/returnTo=%2Fmap%3Ftrip%3Dtrip%26point%3Dstop/)
+  await expect(page).toHaveURL(/returnTo=%2Fmap%3Ftrip%3Dtrip%26pickup%3D1/)
 })
 test('capture homepage for visual review', async ({ page }, testInfo) => {
   await offlineBackend(page)

@@ -9,9 +9,8 @@ const employeeId = '00000000-0000-4000-8000-000000000002'
 const busId = '00000000-0000-4000-8000-000000000010'
 const routeId = '00000000-0000-4000-8000-000000000020'
 const tripId = '00000000-0000-4000-8000-000000000030'
-const pointId = '00000000-0000-4000-8000-000000000040'
-async function mockAccount(page: Page, role: 'admin' | 'employee', assigned = true) {
-  const userId = role === 'admin' ? uid : employeeId
+async function mockAccount(page: Page, role: 'admin' | 'employee' | 'user', assigned = true) {
+  const userId = role === 'employee' ? employeeId : uid
   const profile = {
     id: userId,
     first_name: 'Test',
@@ -52,17 +51,6 @@ async function mockAccount(page: Page, role: 'admin' | 'employee', assigned = tr
         ] as [number, number][] | null,
       },
     ],
-    pickup_points: [
-      {
-        id: pointId,
-        route_id: routeId,
-        name: 'TEST pickup',
-        latitude: 13.22,
-        longitude: 120.59,
-        stop_order: 1,
-        is_active: true,
-      },
-    ],
     trips: [
       {
         id: tripId,
@@ -80,7 +68,11 @@ async function mockAccount(page: Page, role: 'admin' | 'employee', assigned = tr
         id: '00000000-0000-4000-8000-000000000050',
         trip_id: tripId,
         user_id: uid,
-        pickup_point_id: pointId,
+        pickup_latitude: 13.2201,
+        pickup_longitude: 120.5901,
+        pickup_address: 'TEST passenger pin',
+        route_verification: 'near_reviewed_route',
+        route_distance_m: 12,
         status: 'pending',
         requested_at: new Date().toISOString(),
       },
@@ -126,11 +118,23 @@ async function mockAccount(page: Page, role: 'admin' | 'employee', assigned = tr
           json: {
             buses: records.buses,
             routes: records.routes,
-            pickup_points: records.pickup_points,
             trips: records.trips,
             locations: records.locations,
           },
         })
+      if (name === 'check_pickup_location')
+        return route.fulfill({
+          json: {
+            verification: records.routes[0].road_path ? 'near_reviewed_route' : 'unverified',
+            distance_m: records.routes[0].road_path ? 12 : null,
+            can_request: true,
+          },
+        })
+      if (name === 'request_pickup') return route.fulfill({ json: 'new-pickup-request' })
+      if (name === 'cancel_pickup') {
+        records.pickup_requests[0].status = 'cancelled'
+        return route.fulfill({ status: 204 })
+      }
       if (name === 'adjust_passengers') {
         records.trips[0].onboard_count += Number(body.p_delta)
         return route.fulfill({ json: records.trips[0].onboard_count })
@@ -241,6 +245,9 @@ test('employee can count passengers, acknowledge requests, and start/stop GPS', 
   await expect(page.locator('.passenger-count')).toContainText('6')
   await page.getByRole('button', { name: 'Subtract one passenger' }).click()
   await expect(page.locator('.passenger-count')).toContainText('5')
+  await page
+    .getByRole('checkbox', { name: 'I am safely stopped or an authorized assigned crew member' })
+    .check()
   await page.getByRole('button', { name: 'Accept', exact: true }).click()
   await expect(page.getByText('No pending requests')).toBeVisible()
   await page.getByRole('button', { name: 'Start sharing location' }).click()
@@ -265,21 +272,13 @@ test('unassigned employee controls are disabled', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Accept', exact: true })).toBeDisabled()
 })
 
-test('map separates the bus, waiting passenger and device, and traces configured stops only', async ({
+test('map separates the bus, waiting passenger and device, and traces route endpoints only', async ({
   page,
   context,
 }, info) => {
   const records = await mockAccount(page, 'employee')
   records.routes[0].is_approved = false
   records.routes[0].road_path = null
-  records.pickup_points.push({
-    ...records.pickup_points[0],
-    id: '00000000-0000-4000-8000-000000000041',
-    name: 'TEST destination',
-    latitude: 13.23,
-    longitude: 120.6,
-    stop_order: 2,
-  })
   records.locations.push({
     trip_id: tripId,
     latitude: 13.225,
@@ -334,6 +333,9 @@ test('map separates the bus, waiting passenger and device, and traces configured
   await expect(map.locator('.map-symbol-you')).toHaveCount(1)
   expect(publishedPositions).toBe(0)
   await map.getByRole('button', { name: 'Find bus', exact: true }).click()
+  await page
+    .getByRole('checkbox', { name: 'I am safely stopped or an authorized assigned crew member' })
+    .check()
   await page.getByRole('button', { name: 'Accept', exact: true }).click()
   await expect(map.locator('.map-symbol-waiting')).toHaveCount(0)
   await expect(map.locator('.map-symbol-accepted')).toHaveCount(1)
@@ -341,20 +343,12 @@ test('map separates the bus, waiting passenger and device, and traces configured
   await map.screenshot({ path: `.artifacts/map-symbols-${info.project.name}.png` })
 })
 
-test('map keeps an honest stop guide when road routing fails and no bus GPS exists', async ({
+test('map keeps an honest endpoint guide when road routing fails and no bus GPS exists', async ({
   page,
 }) => {
   const records = await mockAccount(page, 'employee')
   records.routes[0].is_approved = false
   records.routes[0].road_path = null
-  records.pickup_points.push({
-    ...records.pickup_points[0],
-    id: '00000000-0000-4000-8000-000000000041',
-    name: 'TEST destination',
-    latitude: 13.23,
-    longitude: 120.6,
-    stop_order: 2,
-  })
   await page.route('https://router.project-osrm.org/**', (route) =>
     route.fulfill({ status: 503, body: 'unavailable' }),
   )
@@ -448,18 +442,10 @@ test('employee schedule searches new addresses, previews roads and requires conf
   await expect(page.locator('tbody tr')).toHaveCount(2)
 })
 
-test('administrator reviews a road path before enabling bus-route pickups', async ({ page }) => {
+test('administrator reviews a road path independently of passenger pins', async ({ page }) => {
   const records = await mockAccount(page, 'admin')
   records.routes[0].is_approved = false
   records.routes[0].road_path = null
-  records.pickup_points.push({
-    ...records.pickup_points[0],
-    id: '00000000-0000-4000-8000-000000000041',
-    name: 'TEST end',
-    latitude: 13.23,
-    longitude: 120.6,
-    stop_order: 2,
-  })
   await page.route('https://router.project-osrm.org/**', (r) =>
     r.fulfill({
       json: {
@@ -484,7 +470,7 @@ test('administrator reviews a road path before enabling bus-route pickups', asyn
   await page.getByRole('button', { name: 'Edit route TEST route', exact: true }).click()
   const dialog = page.getByRole('dialog'),
     approval = dialog.getByRole('checkbox', {
-      name: 'Operator verified this road path and the pickup stops for bus service',
+      name: 'Operator verified this road path for bus service',
     })
   await expect(approval).toBeDisabled()
   await dialog.getByRole('button', { name: 'Preview road route', exact: true }).click()
@@ -661,4 +647,155 @@ test('editing an existing schedule preserves its exact departure and reuses revi
     locations_confirmed: true,
   })
   await expect(dialog).toHaveCount(0)
+})
+
+test('passenger submits a manually adjusted pin with GPS denied and no stop catalog', async ({
+  page,
+}, info) => {
+  const records = await mockAccount(page, 'user')
+  records.routes[0].is_approved = false
+  records.routes[0].road_path = null
+  await page.route('https://photon.komoot.io/**', (route) =>
+    route.fulfill({ json: { features: [] } }),
+  )
+  await page.route('https://router.project-osrm.org/**', (route) => route.fulfill({ status: 503 }))
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: (_success: unknown, failure: (e: { code: number }) => void) =>
+          failure({ code: 1 }),
+      },
+    }),
+  )
+  let published = 0
+  page.on('request', (r) => {
+    if (r.url().endsWith('/rpc/publish_location')) published++
+  })
+  await page.goto(`/map?trip=${tripId}`)
+  await page.getByRole('button', { name: 'Request Pickup', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  const confirm = dialog.getByRole('button', { name: 'Confirm Pickup Request' })
+  await expect(confirm).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Use My Current Location', exact: true }).click()
+  await expect(dialog.getByText(/Location permission denied/)).toBeVisible()
+  await dialog.getByRole('button', { name: 'Choose Location on Map', exact: true }).click()
+  await dialog.locator('.pickup-location-map').click({ position: { x: 180, y: 140 } })
+  await expect(
+    dialog.getByText(/This location is not verified against the bus route/),
+  ).toBeVisible()
+  const pin = dialog.getByTitle('Your selected pickup pin', { exact: true })
+  await pin.focus()
+  await page.keyboard.press('ArrowRight')
+  await dialog
+    .getByLabel('Pickup address or landmark (optional)')
+    .fill('Blue gate by the main road')
+  await expect(confirm).toBeDisabled()
+  await dialog.getByRole('checkbox', { name: /I confirm this pickup pin/ }).check()
+  await expect(confirm).toBeEnabled()
+  const sent = page.waitForRequest((r) => r.url().endsWith('/rpc/request_pickup'))
+  await confirm.click()
+  const body = (await sent).postDataJSON()
+  expect(body.p_trip).toBe(tripId)
+  expect(typeof body.p_latitude).toBe('number')
+  expect(typeof body.p_longitude).toBe('number')
+  expect(Math.abs(body.p_latitude)).toBeLessThan(90)
+  expect(body.p_address).toBe('Blue gate by the main road')
+  expect(body.p_point).toBeUndefined()
+  await expect(page.getByText('Request sent.', { exact: false })).toBeVisible()
+  expect(published).toBe(0)
+  await noOverflow(page)
+  await page.screenshot({ path: `.artifacts/pickup-manual-${info.project.name}.png` })
+})
+
+test('passenger GPS pin is shown once, can be adjusted, and requires confirmation', async ({
+  page,
+  context,
+}, info) => {
+  await mockAccount(page, 'user')
+  await page.route('https://photon.komoot.io/**', (route) =>
+    route.fulfill({ json: { features: [] } }),
+  )
+  await context.grantPermissions(['geolocation'])
+  await context.setGeolocation({ latitude: 13.225, longitude: 120.595, accuracy: 8 })
+  await page.goto(`/map?trip=${tripId}&pickup=1`)
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByText('Pickup: 13.225000, 120.595000')).toBeVisible()
+  await expect(dialog.getByText(/Device accuracy:.*8 m/)).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Confirm Pickup Request' })).toBeDisabled()
+  await expect(dialog.getByText(/operator-reviewed road path/)).toBeVisible()
+  await noOverflow(page)
+  await dialog.screenshot({ path: `.artifacts/pickup-gps-${info.project.name}.png` })
+})
+
+test('too-far assessment and request errors keep the chosen pin without claiming verification', async ({
+  page,
+}) => {
+  await mockAccount(page, 'user')
+  await page.route('https://photon.komoot.io/**', (route) =>
+    route.fulfill({ json: { features: [] } }),
+  )
+  await page.route('**/rpc/check_pickup_location', (route) =>
+    route.fulfill({ json: { verification: 'too_far', distance_m: 1500, can_request: false } }),
+  )
+  await page.goto(`/map?trip=${tripId}&pickup=1`)
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('.pickup-location-map').click({ position: { x: 160, y: 130 } })
+  await expect(dialog.getByRole('alert')).toContainText('within 500 metres')
+  await dialog.getByRole('checkbox', { name: /I confirm this pickup pin/ }).check()
+  await expect(dialog.getByRole('button', { name: 'Confirm Pickup Request' })).toBeDisabled()
+  await page.route('**/rpc/check_pickup_location', (route) =>
+    route.fulfill({ json: { verification: 'unverified', distance_m: null, can_request: true } }),
+  )
+  await dialog.locator('.pickup-location-map').click({ position: { x: 170, y: 140 } })
+  await expect(dialog.getByText(/not verified against the bus route/)).toBeVisible()
+  await page.route('**/rpc/request_pickup', (route) =>
+    route.fulfill({ status: 400, json: { message: 'This bus is currently full.' } }),
+  )
+  await dialog.getByRole('checkbox', { name: /I confirm this pickup pin/ }).check()
+  await dialog.getByRole('button', { name: 'Confirm Pickup Request' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('currently full')
+  await expect(dialog.getByTitle('Your selected pickup pin', { exact: true })).toBeVisible()
+})
+
+test('assigned driver reviews the private pin and sends a safe rejection reason', async ({
+  page,
+}) => {
+  await mockAccount(page, 'employee')
+  await page.goto('/employee')
+  await expect(page.getByRole('button', { name: 'Reject', exact: true })).toBeDisabled()
+  await expect(page.getByText('TEST passenger pin', { exact: true })).toBeVisible()
+  await expect(page.getByText('13.220100, 120.590100', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Show pickup on map' }).click()
+  await expect(page.locator('.map-symbol-waiting')).toHaveCount(1)
+  await page
+    .getByRole('checkbox', { name: 'I am safely stopped or an authorized assigned crew member' })
+    .check()
+  await page.getByLabel('Response note (optional)').fill('Stopping is prohibited here')
+  const response = page.waitForRequest((r) => r.url().endsWith('/rpc/respond_pickup'))
+  await page.getByRole('button', { name: 'Reject', exact: true }).click()
+  expect((await response).postDataJSON()).toMatchObject({
+    p_status: 'rejected',
+    p_safe_to_respond: true,
+    p_reason: 'Stopping is prohibited here',
+  })
+  await expect(page.getByText('No pending requests')).toBeVisible()
+})
+
+test('passenger sees pending status, polling fallback updates acceptance, and accepted pickup can be cancelled', async ({
+  page,
+}) => {
+  const records = await mockAccount(page, 'user')
+  await page.clock.install()
+  await page.goto('/requests')
+  await expect(page.locator('.request-card')).toContainText('Pending')
+  records.pickup_requests[0].status = 'accepted'
+  await page.clock.runFor(15050)
+  await expect(page.locator('.request-card')).toContainText('Accepted')
+  await page.getByRole('button', { name: 'Cancel request', exact: true }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Cancel request', exact: true })
+    .click()
+  await expect(page.locator('.request-card')).toContainText('Cancelled')
 })

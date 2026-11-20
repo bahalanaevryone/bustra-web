@@ -2,7 +2,7 @@
 
 Bus Tracking and Passenger Pickup Request System — a responsive, web-only BSIT capstone for Mamburao, Occidental Mindoro. Built with React, TypeScript, Vite, Tailwind CSS, React Router, Leaflet, and Supabase.
 
-Public visitors can view the map and schedules immediately. Passengers request a pickup at a designated stop. A shared employee dashboard provides schedules, assigned-trip GPS sharing, passenger counts, and request responses. Administrators manage people, buses, routes, stops, and schedules.
+Public visitors can view the map and schedules immediately. Passengers request a pickup using GPS or an adjustable map pin. A shared employee dashboard provides schedules, assigned-trip GPS sharing, passenger counts, and request responses. Administrators manage people, buses, routes, and schedules.
 
 ## Run locally
 
@@ -31,7 +31,7 @@ Save your PNG logo as **`public/bustra-logo.png`**. The shared branding componen
 ## Set up Supabase
 
 1. Open your intended project in the [Supabase dashboard](https://supabase.com/dashboard). Inspect existing tables first. The initial migration expects the seven BUSTRA tables not to exist; do not run it over a different existing BUSTRA schema.
-2. In **SQL Editor**, open a new query, paste the complete contents of [`supabase/migrations/202611200001_bustra_core.sql`](supabase/migrations/202611200001_bustra_core.sql), and run it as the trusted project owner. The transaction creates exactly seven application tables, policies, triggers, indexes, and RPCs. Do not paste it into the browser console.
+2. In **SQL Editor**, open a new query, paste the complete contents of [`supabase/migrations/202611200001_bustra_core.sql`](supabase/migrations/202611200001_bustra_core.sql), and run it as the trusted project owner. The initial transaction creates seven tables; apply every later migration in filename order. The latest pickup migration safely retires the old catalog, leaving six main tables. Do not paste it into the browser console.
 3. In **Authentication → URL configuration**, set the site URL and allowed redirects for `http://127.0.0.1:5173/login`, `http://127.0.0.1:5173/update-password`, and your future HTTPS host. If using `localhost` instead, allow that origin too.
 4. Enable email/password signup. Keep email confirmation enabled for public deployments. Configure SMTP for reliable delivery; provider rate limits still apply. The registration screen directs the user to login and explains verification.
 5. Enable the Data API for `public`. Keep the `private` schema unexposed. The migration provides explicit table/function grants and enables RLS on every application table.
@@ -60,9 +60,9 @@ Existing Auth accounts created before this schema need profiles. See [`docs/setu
 
 The default app requests **real** public data and shows an honest empty/error state when none is available. Choose **Explore demo** in the connection notice, or open `/?demo=1` for an explicit illustrative demo. Demo bus positions are fixed, outdated, and never labelled live; demo pickup submissions are disabled. Exiting demo returns to the real backend.
 
-The optional [`supabase/seed.sql`](supabase/seed.sql) inserts explicitly labelled development buses, routes, illustrative pickup points, and one unassigned future schedule if an admin exists. Run it manually only in a development project. It creates no credentials, assigned drivers, active trips, or GPS positions. Real stops and routes must be supplied by an authorised operator, with verified coordinates.
+The optional [`supabase/seed.sql`](supabase/seed.sql) inserts explicitly labelled development buses, routes, and one unassigned future schedule if an admin exists. Apply all migrations first and run the seed only in a development project. It creates no credentials, assigned drivers, active trips, or GPS positions. Employees confirm real route endpoints; passengers choose their pickup pins.
 
-To test a journey, register real locations/stops through the admin workspace, then create a schedule with the six fields described below. The assigned employee uses **Start** in the schedule row and **Start sharing location** on a GPS-enabled device. Use HTTPS for mobile GPS; loopback URLs on a phone point to the phone, not your computer.
+To test a journey, create a schedule with confirmed origin/destination coordinates, assign a driver, and start the trip. Passengers choose their own pickup pins. The assigned employee uses **Start** in the schedule row and **Start sharing location** on a GPS-enabled device. Use HTTPS for mobile GPS; loopback URLs on a phone point to the phone, not your computer.
 
 ## Dynamic schedule locations
 
@@ -70,24 +70,26 @@ To test a journey, register real locations/stops through the admin workspace, th
 
 The form shows the generated route name and either an existing reviewed path or a configured router's driving suggestion. It requires explicit location/route confirmation before **Save Schedule**. Changing locations, labels or assignment clears confirmation. Missing search results or routing do not invent addresses or road lines; map/custom-label selection and a pending-review schedule remain available. Bus, driver, departure time and initial passenger count retain their validation and controls.
 
-The additive [dynamic-location migration](supabase/migrations/20261120055359_dynamic_schedule_locations.sql) adds the requested origin_lat, origin_lng, destination_lat and destination_lng fields, backfills previous coordinates and preserves records and legacy aliases. Route matching uses normalized endpoint labels plus a 50-metre tolerance at both endpoints, with transaction locking to prevent concurrent duplicate creation. Equal labels at distant positions are separate routes. New locations need no database registration, and new routes still create no pickup stops or automatic approval.
+The additive [dynamic-location migration](supabase/migrations/20261120055359_dynamic_schedule_locations.sql) adds the requested origin_lat, origin_lng, destination_lat and destination_lng fields, backfills previous coordinates and preserves records and legacy aliases. Route matching uses normalized endpoint labels plus a 50-metre tolerance at both endpoints, with transaction locking to prevent concurrent duplicate creation. Equal labels at distant positions are separate routes. New locations need no database registration. Route approval remains separate from passenger pin requests; see the latest pickup guide.
 
 See [the complete component, API configuration and testing guide](docs/dynamic-locations.md).
 
 ## Map routes and symbols
 
-Assign at least two verified **active pickup points** using **Admin → Pickup points**, in distinct travel order. Route endpoints are separate coordinates and do not automatically become pickup stops. The operator reviews road access and designated stop positions before approving passenger pickups.
+Passengers select a one-time pickup position through GPS or the map; no stop catalog is required. Only the owner and assigned employee may read the coordinates. Driver review is required for safe and permitted stopping; proximity to a road path never guarantees boarding.
 
-The map draws the saved **green operator-reviewed road path** for approved routes. For unapproved routes, it automatically requests a **blue suggested driving path** when `VITE_ROUTING_URL` is configured. This is explicitly labelled unapproved for buses; routing cannot infer transport permits or bus restrictions. Missing/failed routing leaves a **dashed endpoint/stop guide**, which is not represented as a road path. Verified endpoint coordinates can show a new route before any pickup stops are registered, without making those endpoints pickup locations. No historical GPS trail is stored.
+The map draws saved **green operator-reviewed road paths**, **blue suggested driving paths** when routing is configured, and **dashed endpoint guides** when geometry is unavailable. Endpoint guides are not road geometry. Pickup proximity uses stored actual geometry only; without it, requests are explicitly unverified.
 
-- **Blue bus + plate label:** last GPS position reported by the assigned employee. It turns grey after 90 seconds without an update. **Find bus** centres on the selected bus, or the first displayed bus if none is selected.
-- **Orange person + count:** pending pickup requests at a designated stop. **Teal person:** accepted requests; this does not confirm boarding. Guests see stops but no private request counts. Passengers see their own requests; staff and admin see only rows allowed by database RLS. The marker is the selected stop, not a passenger's live device location.
-- **Green A / red B / flag:** route origin, destination, and intermediate pickup stops.
-- **Purple person + accuracy circle:** the viewer's device location from **Locate me**, kept in that browser. Employee **Start sharing location** is the separate action that publishes the bus position.
+- **Blue bus + plate label:** latest employee GPS report, grey after 90 seconds. **Find bus** centres the bus.
+- **Orange person / teal person:** private pending / accepted passenger pickup positions. These are confirmed pins, not continuous passenger tracking.
+- **Green A / red B:** route origin / destination.
+- **Purple person + accuracy circle:** viewer's browser-only location from **Locate me**. Employee bus sharing is separate.
+
+See [dynamic pickup components, migration, permissions, configuration and testing](docs/dynamic-pickups.md).
 
 For Android testing, open the HTTPS site in Chrome, enable Android Location and precise location for Chrome, allow the site's location permission, and keep the employee page active. Laptop location may be very approximate. Chrome DevTools Sensors overrides simulate a location; remove overrides for real GPS. The app rejects bus reports with accuracy worse than 100 metres. The database stores only the latest bus position, so no historical journey trail is shown.
 
-Road routing is disabled when `VITE_ROUTING_URL` is blank. The current test deployment configures the public [OSRM demo service](https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server) for light testing. Routing is cached per browser tab and queued at less than one request per second per tab. Configured route endpoints/stops and employee-selected schedule positions are sent to the router; passenger/device tracking positions are not. Public demo capacity is shared and has no availability guarantee; configure your own compatible endpoint for wider use. Stored approved geometry remains visible if routing becomes unavailable.
+Road routing is disabled when `VITE_ROUTING_URL` is blank. The current test deployment configures the public [OSRM demo service](https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server) for light testing. Routing is cached per browser tab and queued at less than one request per second per tab. Confirmed route endpoints and employee-selected schedule positions are sent to the router; passenger/device tracking positions are not. Public demo capacity is shared and has no availability guarantee; configure your own compatible endpoint for wider use. Stored approved geometry remains visible if routing becomes unavailable.
 
 ## Verification
 

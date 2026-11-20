@@ -11,7 +11,6 @@ export const entityNames: Record<Entity, string> = {
   profiles: 'user',
   buses: 'bus',
   routes: 'route',
-  pickup_points: 'pickup point',
   trips: 'schedule',
 }
 export type RecordData = Record<string, string | number | boolean | null | undefined>
@@ -116,7 +115,6 @@ function RecordEditor({
     setError('')
     try {
       const values: Record<string, unknown> = Object.fromEntries(new FormData(form))
-      if (entity === 'pickup_points') values.is_active = values.is_active === 'on'
       if (entity === 'routes') {
         values.is_approved = values.is_approved === 'on'
         values.road_path = roadPath
@@ -160,44 +158,14 @@ function RecordEditor({
             {field('origin', 'Origin')}
             {field('destination', 'Destination')}
             <p className="form-help">
-              Add at least two verified pickup stops in travel order before approving this bus
-              route. Origin and destination pins do not automatically become pickup stops.
+              Review the actual road path before approving this route for bus service. Passenger
+              pins still require driver review.
             </p>
             <RouteReview
               route={data.routes.find((r) => r.id === record?.id)}
-              points={data.pickup_points}
               path={roadPath}
               onPath={setRoadPath}
             />
-          </>
-        )}
-        {entity === 'pickup_points' && (
-          <>
-            {field('name', 'Pickup point name')}
-            {field(
-              'route_id',
-              'Route',
-              'text',
-              data.routes.map((r) => ({ value: r.id, label: r.route_name })),
-            )}
-            <div className="form-two-col">
-              {field('latitude', 'Latitude', 'number')}
-              {field('longitude', 'Longitude', 'number')}
-            </div>
-            {field('stop_order', 'Stop order', 'number')}
-            <p className="form-help">
-              Use a different order number for each designated stop: 1 for the first pickup stop,
-              then 2, 3 and so on in travel order. Verify that each position is a valid pickup stop
-              on the bus route.
-            </p>
-            <label className="checkbox-field">
-              <input
-                name="is_active"
-                type="checkbox"
-                defaultChecked={record?.is_active !== false}
-              />{' '}
-              Active pickup point
-            </label>
           </>
         )}
         {entity === 'profiles' && (

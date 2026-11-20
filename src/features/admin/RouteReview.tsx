@@ -1,20 +1,18 @@
 import { useState } from 'react'
-import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet'
+import { MapContainer, Polyline, TileLayer } from 'react-leaflet'
 import { latLngBounds } from 'leaflet'
 import type { Coordinate } from '../map/routeGeometry'
 import { getRouteGuides } from '../map/routeGeometry'
 import { requestRoadRoute, routingConfigured } from '../map/roadRouting'
-import type { Route, PickupPoint } from '../../types'
+import type { Route } from '../../types'
 import { errorMessage } from '../../lib/utils'
 
 export function RouteReview({
   route,
-  points,
   path,
   onPath,
 }: {
   route?: Route
-  points: PickupPoint[]
   path: Coordinate[] | null
   onPath: (path: Coordinate[] | null) => void
 }) {
@@ -25,7 +23,6 @@ export function RouteReview({
     route &&
     getRouteGuides({
       routes: [route],
-      pickup_points: points,
       trips: [],
       buses: [],
       locations: [],
@@ -47,8 +44,8 @@ export function RouteReview({
   return (
     <div className="route-review">
       <p className="form-help">
-        Review the proposed road path and every pickup stop with the transport operator before
-        approving it for bus service. A driving route alone is not bus approval.
+        Review the proposed road path with the transport operator before approving it for bus
+        service. A driving route alone is not bus approval.
       </p>
       <button
         type="button"
@@ -60,7 +57,7 @@ export function RouteReview({
       </button>
       {!route && (
         <p className="form-help">
-          Save the route, add its verified pickup points, then reopen it for review.
+          Save confirmed route endpoints, then reopen the route for review.
         </p>
       )}
       {!routingConfigured() && (
@@ -84,18 +81,6 @@ export function RouteReview({
             attribution="&copy; OpenStreetMap contributors · Routing: OSRM"
           />
           <Polyline positions={path} pathOptions={{ color: '#2766dc', weight: 4 }} />
-          {guide?.stops.map((p) => (
-            <CircleMarker
-              key={p.id}
-              center={[Number(p.latitude), Number(p.longitude)]}
-              radius={6}
-              pathOptions={{ color: '#c47b12', fillOpacity: 1 }}
-            >
-              <Popup>
-                {p.stop_order}. {p.name}
-              </Popup>
-            </CircleMarker>
-          ))}
         </MapContainer>
       )}
       <label className="checkbox-field">
@@ -106,7 +91,7 @@ export function RouteReview({
           checked={approved && !!path}
           onChange={(e) => setApproved(e.target.checked)}
         />{' '}
-        Operator verified this road path and the pickup stops for bus service
+        Operator verified this road path for bus service
       </label>
       {error && (
         <p className="danger-text" role="alert">

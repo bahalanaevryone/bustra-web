@@ -350,3 +350,43 @@
     padding: 12px;
   }
 }
+
+.modal.pickup-modal {
+  width: min(760px, calc(100vw - 24px));
+  max-width: 760px;
+}
+.pickup-location-map {
+  height: clamp(260px, 42vh, 390px);
+  width: 100%;
+  border-radius: 12px;
+}
+.pickup-selector {
+  min-width: 0;
+}
+.pickup-selector .inline-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.pickup-pin {
+  background: #ba7013;
+}
+.pickup-coordinates {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.pickup-selector .checkbox-field {
+  align-items: flex-start;
+  margin: 16px 0;
+}
+@media (max-width: 600px) {
+  .pickup-modal .modal-actions {
+    flex-wrap: wrap;
+  }
+  .pickup-modal .modal-actions .button {
+    flex: 1 1 100%;
+  }
+  .pickup-selector .inline-actions .button {
+    flex: 1 1 100%;
+  }
+}

@@ -1,60 +1,62 @@
-import { useState } from 'react'
-import { MapPin, Users, Clock, ShieldCheck } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Users, Clock, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useData } from '../../hooks/useData'
 import { useAuth } from '../auth/AuthProvider'
-import { rpc } from '../../lib/supabase/client'
-import { errorMessage, isFresh, locationAge, time } from '../../lib/utils'
+import { isFresh, locationAge, time } from '../../lib/utils'
 import { Modal, Notice, Status } from '../../components/ui'
-import { validPickupPoints } from '../map/routeGeometry'
+import { PickupSelector } from '../pickups/PickupSelector'
 
 export function BusDetails({
   tripId,
   onClose,
-  initialPoint = '',
+  initialPickup = false,
 }: {
   tripId: string
   onClose: () => void
-  initialPoint?: string
+  initialPickup?: boolean
 }) {
   const { feed, demo } = useData()
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
-  const [point, setPoint] = useState(initialPoint)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [choosing, setChoosing] = useState(false)
   const [success, setSuccess] = useState(false)
   const trip = feed.trips.find((t) => t.id === tripId)
   const bus = feed.buses.find((b) => b.id === trip?.bus_id)
   const route = feed.routes.find((r) => r.id === trip?.route_id)
   const location = feed.locations.find((l) => l.trip_id === tripId)
+  useEffect(() => {
+    if (initialPickup && user && profile?.role === 'user' && !demo && trip?.status === 'active')
+      setChoosing(true)
+  }, [initialPickup, user?.id, profile?.role, demo, trip?.status])
   if (!trip || !bus)
     return (
       <Modal title="Bus unavailable" onClose={onClose}>
         <p>This trip is no longer publicly available.</p>
       </Modal>
     )
-  const points = validPickupPoints(route, feed.pickup_points)
-  async function request() {
-    if (!points.some((p) => p.id === point)) {
-      setError('Choose a valid pickup stop on this approved bus route.')
-      return
-    }
+  function request() {
     if (!user) {
-      navigate(`/login?returnTo=${encodeURIComponent(`/map?trip=${tripId}&point=${point}`)}`)
+      navigate(`/login?returnTo=${encodeURIComponent(`/map?trip=${tripId}&pickup=1`)}`)
       return
     }
-    setBusy(true)
-    setError('')
-    try {
-      await rpc('request_pickup', { p_trip: tripId, p_point: point })
-      setSuccess(true)
-    } catch (e) {
-      setError(errorMessage(e))
-    } finally {
-      setBusy(false)
-    }
+    setChoosing(true)
   }
+  if (choosing)
+    return (
+      <Modal title="Choose pickup location" onClose={onClose} className="pickup-modal">
+        <PickupSelector
+          tripId={tripId}
+          busLabel={bus.plate_number}
+          route={route}
+          onBack={() => setChoosing(false)}
+          onSent={() => {
+            setChoosing(false)
+            setSuccess(true)
+          }}
+        />
+      </Modal>
+    )
   return (
     <Modal title={bus.plate_number} onClose={onClose}>
       <div className="detail-route">
@@ -96,41 +98,28 @@ export function BusDetails({
           .
         </Notice>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            void request()
-          }}
-        >
-          <label className="field">
-            <span>
-              <MapPin size={16} /> Pickup point
-            </span>
-            <select value={point} onChange={(e) => setPoint(e.target.value)} required>
-              <option value="">Choose a designated stop</option>
-              {points.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {error && <Notice tone="error">{error}</Notice>}
-          {!route?.is_approved && (
-            <Notice tone="info">
-              This route is awaiting operator review. Pickup requests open after the road path and
-              designated stops are approved.
-            </Notice>
+        <div>
+          {user && profile?.role !== 'user' && (
+            <Notice>Use a passenger account to request pickup.</Notice>
           )}
           <button
-            disabled={demo || busy || trip.status !== 'active' || !points.length}
+            disabled={
+              demo ||
+              trip.status !== 'active' ||
+              (!!user && profile?.role !== 'user') ||
+              trip.onboard_count >= bus.capacity
+            }
             className="button button-primary full-width"
-            type="submit"
+            onClick={request}
           >
-            {busy ? 'Sending…' : user ? 'Request pickup' : 'Log in to request pickup'}
+            {trip.onboard_count >= bus.capacity
+              ? 'Bus currently full'
+              : user
+                ? 'Request Pickup'
+                : 'Log in to request pickup'}
           </button>
           {demo && <p className="form-help">Requests are disabled for illustrative demo trips.</p>}
-        </form>
+        </div>
       )}
       <p className="fine-print">
         <ShieldCheck size={16} /> A request alerts the assigned employee. It does not reserve a seat

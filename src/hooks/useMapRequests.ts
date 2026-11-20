@@ -3,7 +3,7 @@ import { useAuth } from '../features/auth/AuthProvider'
 import { supabase } from '../lib/supabase/client'
 import type { MapRequest } from '../types'
 
-// RLS scopes these rows to the owner, assigned trip employee, or admin.
+// RLS scopes these rows to the owner or assigned trip employee.
 // No passenger request data enters the guest public feed.
 export function useMapRequests(enabled = true) {
   const { user, profile } = useAuth()
@@ -17,7 +17,7 @@ export function useMapRequests(enabled = true) {
     async function load() {
       const { data, error } = await supabase!
         .from('pickup_requests')
-        .select('id,trip_id,pickup_point_id,status,requested_at')
+        .select('id,trip_id,pickup_latitude,pickup_longitude,pickup_address,status,requested_at')
         .in('status', ['pending', 'accepted'])
         .limit(1000)
       if (!disposed)

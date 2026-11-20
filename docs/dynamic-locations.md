@@ -1,5 +1,7 @@
 # Dynamic schedule locations
 
+Passenger pickup requirements have since changed: see [Dynamic pickups](dynamic-pickups.md), which supersedes references below to mandatory designated stops.
+
 Employees can search addresses or choose any valid position on the map. Neither endpoint needs to exist in Supabase. Bus and driver selections still use the operational records. All other dashboard modules and pickup permissions remain in place.
 
 ## Components
@@ -61,4 +63,4 @@ Manual verification:
 4. Choose bus/driver/time/count, confirm the locations and save. Repeating the same normalized labels and nearby positions should reuse `route_id`; distant equal labels should not.
 5. Move a pin after confirming: confirmation must clear. Type an address without selecting a result: saving must stay disabled until a position is selected.
 6. Disable/block geocoding or routing: map/custom-label selection must remain available, routing failure must show no invented road line, and the confirmed schedule must remain pending route review.
-7. With a passenger account, verify that only the trip route's approved designated pickup points are requestable. Unapproved routes, inactive stops and stops from other routes remain rejected by the database.
+7. With a passenger account, test GPS/manual pickup pins using [the latest dynamic pickup process](dynamic-pickups.md). No registered stop is required. Missing stored geometry is explicitly unverified, and drivers review safe stopping.

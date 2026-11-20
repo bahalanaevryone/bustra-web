@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   BusFront,
@@ -39,14 +39,12 @@ const adminTabs: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'buses', label: 'Buses', icon: BusFront },
   { key: 'trips', label: 'Schedules', icon: CalendarDays },
   { key: 'routes', label: 'Routes', icon: RouteIcon },
-  { key: 'pickup_points', label: 'Pickup points', icon: MapPin },
 ]
 const employeeTabs = [
   adminTabs[0],
   { key: 'map', label: 'Live map', icon: MapPin },
   adminTabs[3],
   adminTabs[2],
-  adminTabs[5],
 ]
 export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
   const admin = kind === 'admin'
@@ -65,12 +63,19 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [safeResponse, setSafeResponse] = useState(false)
+  const [responseNote, setResponseNote] = useState('')
+  const [focusedPickup, setFocusedPickup] = useState<import('../types').MapRequest>()
   const selectedTrip =
     data.trips.find((t) => t.id === selected) ||
     data.trips.find((t) => t.driver_id === user?.id && t.status === 'active')
   const bus = data.buses.find((b) => b.id === selectedTrip?.bus_id)
   const canOperate =
     !admin && selectedTrip?.driver_id === user?.id && selectedTrip?.status === 'active'
+  useEffect(() => {
+    setSafeResponse(false)
+    setFocusedPickup(undefined)
+  }, [selectedTrip?.id])
   const gps = useLocationSharing(selectedTrip?.id, canOperate)
   const requests = data.pickup_requests.filter(
     (r) => r.trip_id === selectedTrip?.id && r.status === 'pending',
@@ -134,11 +139,6 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
       ['origin', 'Origin'],
       ['destination', 'Destination'],
       ['is_approved', 'Operator approved'],
-    ],
-    pickup_points: [
-      ['name', 'Pickup point'],
-      ['route_id', 'Route'],
-      ['is_active', 'Active'],
     ],
     trips: [
       ['departure_at', 'Departure'],
@@ -264,12 +264,12 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
                   </div>
                   <BusMap
                     waitingRequests={data.pickup_requests}
+                    focusedPickup={focusedPickup}
                     feed={
                       demo
                         ? {
                             buses: data.buses,
                             routes: data.routes,
-                            pickup_points: data.pickup_points,
                             trips: data.trips,
                             locations: [],
                           }
@@ -440,14 +440,52 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
                     </h2>
                     <span className="count-pill">{requests.length}</span>
                   </div>
+                  {requests.length > 0 && (
+                    <div className="filter-panel">
+                      <label className="checkbox-field">
+                        <input
+                          type="checkbox"
+                          checked={safeResponse}
+                          onChange={(e) => setSafeResponse(e.target.checked)}
+                        />
+                        I am safely stopped or an authorized assigned crew member
+                      </label>
+                      <label className="field">
+                        <span>Response note (optional)</span>
+                        <input
+                          maxLength={300}
+                          value={responseNote}
+                          onChange={(e) => setResponseNote(e.target.value)}
+                          placeholder="Unsafe stop, prohibited stopping, bus full..."
+                        />
+                      </label>
+                    </div>
+                  )}
                   {requests.length ? (
                     requests.map((r) => (
                       <div className="queue-row" key={r.id}>
                         <div>
-                          <strong>
-                            {data.pickup_points.find((p) => p.id === r.pickup_point_id)?.name ||
-                              'Pickup point'}
-                          </strong>
+                          <strong>{r.pickup_address || 'Selected pickup location'}</strong>
+                          <p>
+                            {Number(r.pickup_latitude).toFixed(6)},{' '}
+                            {Number(r.pickup_longitude).toFixed(6)}
+                          </p>
+                          <p className="form-help">
+                            {r.route_verification === 'unverified'
+                              ? 'Route proximity unverified. Review this location.'
+                              : `Near stored road path (${r.route_distance_m ?? 0} m). Safe stopping still needs review.`}
+                          </p>
+                          <button
+                            className="text-button"
+                            onClick={() => {
+                              setFocusedPickup(r)
+                              document
+                                .querySelector('.bus-map')
+                                ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                            }}
+                          >
+                            Show pickup on map
+                          </button>
                           <small>
                             {time(r.requested_at)} · Request {r.id.slice(0, 8)}
                           </small>
@@ -455,11 +493,16 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
                         <div className="inline-actions">
                           <button
                             className="button button-outline button-small"
-                            disabled={!canOperate || busy}
+                            disabled={!canOperate || busy || !safeResponse}
                             onClick={() => {
                               void action(
                                 'respond_pickup',
-                                { p_request: r.id, p_status: 'rejected' },
+                                {
+                                  p_request: r.id,
+                                  p_status: 'rejected',
+                                  p_safe_to_respond: safeResponse,
+                                  p_reason: responseNote,
+                                },
                                 'Request rejected.',
                               )
                             }}
@@ -468,11 +511,16 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
                           </button>
                           <button
                             className="button button-primary button-small"
-                            disabled={!canOperate || busy}
+                            disabled={!canOperate || busy || !safeResponse}
                             onClick={() => {
                               void action(
                                 'respond_pickup',
-                                { p_request: r.id, p_status: 'accepted' },
+                                {
+                                  p_request: r.id,
+                                  p_status: 'accepted',
+                                  p_safe_to_respond: safeResponse,
+                                  p_reason: responseNote,
+                                },
                                 'Request accepted. Passenger count is unchanged.',
                               )
                             }}

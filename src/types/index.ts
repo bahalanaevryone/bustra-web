@@ -29,15 +29,6 @@ export interface Route {
   is_approved?: boolean
   road_path?: [number, number][] | null
 }
-export interface PickupPoint {
-  id: string
-  route_id: string
-  name: string
-  latitude: number
-  longitude: number
-  stop_order: number
-  is_active: boolean
-}
 export interface Trip {
   id: string
   bus_id: string
@@ -60,20 +51,30 @@ export interface PickupRequest {
   id: string
   trip_id: string
   user_id: string
-  pickup_point_id: string
+  pickup_latitude: number
+  pickup_longitude: number
+  pickup_address?: string | null
+  route_verification?: 'near_reviewed_route' | 'near_suggested_route' | 'unverified'
+  route_distance_m?: number | null
+  response_note?: string | null
   status: RequestStatus
   requested_at: string
   responded_at?: string
 }
 export type MapRequest = Pick<
   PickupRequest,
-  'id' | 'trip_id' | 'pickup_point_id' | 'status' | 'requested_at'
+  | 'id'
+  | 'trip_id'
+  | 'pickup_latitude'
+  | 'pickup_longitude'
+  | 'pickup_address'
+  | 'status'
+  | 'requested_at'
 >
 export interface PublicFeed {
   buses: Bus[]
   routes: Route[]
-  pickup_points: PickupPoint[]
   trips: Trip[]
   locations: BusLocation[]
 }
-export type Entity = 'profiles' | 'buses' | 'routes' | 'pickup_points' | 'trips'
+export type Entity = 'profiles' | 'buses' | 'routes' | 'trips'

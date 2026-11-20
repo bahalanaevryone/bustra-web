@@ -13,6 +13,7 @@ export function demoFeed(): PublicFeed {
         id: 'demo-route-1',
         route_name: 'DEMO · Mamburao local loop',
         origin: 'Illustrative terminal',
+        origin_lat: 13.2233, origin_lng: 120.596, destination_lat: 13.237, destination_lng: 120.601,
         destination: 'Illustrative north stop',
       },
       {
@@ -20,35 +21,6 @@ export function demoFeed(): PublicFeed {
         route_name: 'DEMO · Coastal connector',
         origin: 'Illustrative central stop',
         destination: 'Illustrative coastal stop',
-      },
-    ],
-    pickup_points: [
-      {
-        id: 'demo-point-1',
-        route_id: 'demo-route-1',
-        name: 'DEMO · Central pickup',
-        latitude: 13.2233,
-        longitude: 120.596,
-        stop_order: 1,
-        is_active: true,
-      },
-      {
-        id: 'demo-point-2',
-        route_id: 'demo-route-1',
-        name: 'DEMO · North pickup',
-        latitude: 13.237,
-        longitude: 120.601,
-        stop_order: 2,
-        is_active: true,
-      },
-      {
-        id: 'demo-point-3',
-        route_id: 'demo-route-2',
-        name: 'DEMO · Coastal pickup',
-        latitude: 13.215,
-        longitude: 120.588,
-        stop_order: 1,
-        is_active: true,
       },
     ],
     trips: [

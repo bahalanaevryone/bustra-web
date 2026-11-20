@@ -16,21 +16,13 @@ import {
   MapPin,
   BusFront,
   Users,
-  Flag,
   Route as RouteIcon,
   Navigation,
   LoaderCircle,
 } from 'lucide-react'
 import type { MapRequest, PublicFeed } from '../../types'
 import { isFresh, locationAge } from '../../lib/utils'
-import {
-  escapeHtml,
-  distanceKm,
-  farFromRoute,
-  getRouteGuides,
-  getWaitingAtStop,
-  validCoordinate,
-} from './routeGeometry'
+import { escapeHtml, farFromRoute, getRouteGuides, validCoordinate } from './routeGeometry'
 import type { Coordinate } from './routeGeometry'
 import { requestRoadRoute, routingConfigured } from './roadRouting'
 import type { RoadRoute } from './roadRouting'
@@ -59,6 +51,7 @@ function MapView({
   selectionKey,
   busPosition,
   busKey,
+  pickup,
 }: {
   position: Coordinate | null
   initialPoints: Coordinate[]
@@ -66,6 +59,7 @@ function MapView({
   selectionKey: string
   busPosition?: Coordinate
   busKey: string
+  pickup?: MapRequest
 }) {
   const map = useMap()
   const fitted = useRef(false)
@@ -91,6 +85,9 @@ function MapView({
   useEffect(() => {
     if (position) map.flyTo(position, 16)
   }, [position, map])
+  useEffect(() => {
+    if (pickup) map.flyTo([Number(pickup.pickup_latitude), Number(pickup.pickup_longitude)], 17)
+  }, [pickup, map])
   useEffect(() => {
     if (busKey && busKey !== previousBus.current && busPosition) {
       map.flyTo(busPosition, 16)
@@ -124,6 +121,7 @@ export function BusMap({
   large = false,
   waitingRequests = [],
   selectedRoute,
+  focusedPickup,
 }: {
   feed: PublicFeed
   selected?: string
@@ -132,6 +130,7 @@ export function BusMap({
   large?: boolean
   waitingRequests?: MapRequest[]
   selectedRoute?: string
+  focusedPickup?: MapRequest
 }) {
   const [position, setPosition] = useState<Coordinate | null>(null)
   const [positionAccuracy, setPositionAccuracy] = useState(0)
@@ -148,7 +147,7 @@ export function BusMap({
   }, [])
   const guides = useMemo(
     () => getRouteGuides(feed, selected, selectedRoute),
-    [feed.routes, feed.pickup_points, feed.trips, selected, selectedRoute],
+    [feed.routes, feed.trips, selected, selectedRoute],
   )
   const routeIds = new Set(guides.map((g) => g.routeId))
   const routeKey = (routeId: string) =>
@@ -159,11 +158,7 @@ export function BusMap({
   )
   const selectedLocation = locations.find((l) => l.trip_id === selected)
   const focusedLocation = selectedLocation || locations[0]
-  const points = guides.flatMap((g) =>
-    g.coordinates.length
-      ? g.coordinates
-      : g.stops.map((p) => [Number(p.latitude), Number(p.longitude)] as Coordinate),
-  )
+  const points = guides.flatMap((g) => g.roadPath || g.coordinates)
   const initialPoints = points.length
     ? points
     : locations.map((l) => [Number(l.latitude), Number(l.longitude)] as Coordinate)
@@ -204,8 +199,8 @@ export function BusMap({
     setRouting(true)
     setRoutingError('')
     try {
-      // Routing receives configured stops, never passenger or device GPS.
-      for (const guide of guides.filter((g) => g.ordered && !g.approved)) {
+      // Routing receives route endpoints, never passenger or device GPS.
+      for (const guide of guides.filter((g) => g.ordered && !g.approved && !g.roadPath)) {
         const key = JSON.stringify(guide.coordinates)
         const road = await requestRoadRoute(guide.coordinates)
         setRoadRoutes((previous) => ({ ...previous, [key]: road }))
@@ -216,14 +211,14 @@ export function BusMap({
       setRouting(false)
     }
   }
-  const hasLine = guides.some((g) => g.ordered)
+  const hasLine = guides.some((g) => g.ordered || g.roadPath)
   const geometryKey = JSON.stringify(guides.map((g) => [g.routeId, g.coordinates, g.approved]))
   useEffect(() => {
     if (demo || !routingConfigured()) return
     let disposed = false
     setRoutingError('')
     void (async () => {
-      for (const guide of guides.filter((g) => g.ordered && !g.approved)) {
+      for (const guide of guides.filter((g) => g.ordered && !g.approved && !g.roadPath)) {
         if (disposed) return
         try {
           const road = await requestRoadRoute(guide.coordinates)
@@ -261,6 +256,7 @@ export function BusMap({
           />
           <MapView
             position={position}
+            pickup={focusedPickup}
             initialPoints={initialPoints}
             selectionPoints={initialPoints}
             selectionKey={selectionKey}
@@ -273,7 +269,7 @@ export function BusMap({
           />
           <FitButton points={completePoints} />
           {guides
-            .filter((g) => g.ordered)
+            .filter((g) => g.ordered || g.roadPath)
             .map((guide) => {
               const road = roadRoutes[routeKey(guide.routeId)]
               return (
@@ -294,10 +290,10 @@ export function BusMap({
                     </p>
                     <p>
                       {guide.approved
-                        ? 'Operator-reviewed bus route. Pickup requests are limited to its approved stops.'
-                        : road
+                        ? 'Operator-reviewed road path. Each passenger pickup still needs driver review.'
+                        : guide.roadPath || road
                           ? 'Suggested driving path only. This road path is not approved for bus service.'
-                          : 'Stop-to-stop guide. Dashed segments connect ordered stops and do not represent the road path.'}
+                          : 'Endpoint guide only. Dashed segments do not represent a road route.'}
                     </p>
                   </Popup>
                 </Polyline>
@@ -307,13 +303,6 @@ export function BusMap({
             guide.ordered
               ? [0, guide.coordinates.length - 1].map((index, i) => {
                   const position = guide.coordinates[index]
-                  if (
-                    guide.stops.some(
-                      (p) =>
-                        Number(p.latitude) === position[0] && Number(p.longitude) === position[1],
-                    )
-                  )
-                    return null
                   return (
                     <Marker
                       key={`${guide.routeId}-endpoint-${i}`}
@@ -323,91 +312,38 @@ export function BusMap({
                     >
                       <Popup>
                         {i === 0 ? guide.origin : guide.destination}
-                        <p>
-                          Route endpoint. Pickup is available only at an approved designated stop.
-                        </p>
+                        <p>Route endpoint. Choose your pickup pin and wait for driver review.</p>
                       </Popup>
                     </Marker>
                   )
                 })
               : [],
           )}
-          {guides.flatMap((guide) =>
-            guide.stops.map((point) => {
-              const counts = getWaitingAtStop(waitingRequests, feed, point.id)
-              const stopPosition: Coordinate = [Number(point.latitude), Number(point.longitude)]
-              const origin = guide.ordered && distanceKm(stopPosition, guide.coordinates[0]) < 0.001
-              const destination =
-                guide.ordered &&
-                distanceKm(stopPosition, guide.coordinates[guide.coordinates.length - 1]) < 0.001
-              const kind = counts.pending
-                ? 'waiting'
-                : counts.accepted
-                  ? 'accepted'
-                  : origin
-                    ? 'origin'
-                    : destination
-                      ? 'destination'
-                      : 'stop'
-              const content =
-                counts.pending || counts.accepted
-                  ? `${personSvg}<b>${counts.pending || counts.accepted}</b>`
-                  : origin
-                    ? 'A'
-                    : destination
-                      ? 'B'
-                      : '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 21V3h12v10H6M6 8h12"/></svg>'
-              const title = counts.pending
-                ? `${counts.pending} pending pickup request${counts.pending === 1 ? '' : 's'} at ${point.name}`
-                : counts.accepted
-                  ? `Accepted pickup at ${point.name}`
-                  : `${origin ? 'Origin' : destination ? 'Destination' : 'Pickup point'}: ${point.name}`
-              return (
-                <Marker
-                  key={point.id}
-                  title={title}
-                  alt={title}
-                  position={[Number(point.latitude), Number(point.longitude)]}
-                  icon={simpleIcon(kind, content)}
-                >
-                  <Popup>
-                    <strong>{point.name}</strong>
-                    <p>
-                      {origin
-                        ? `A · Origin: ${guide.origin}`
-                        : destination
-                          ? `B · Destination: ${guide.destination}`
-                          : 'Designated pickup point'}
-                      {demo ? ' · DEMO' : ''}
-                    </p>
-                    {counts.pending > 0 && (
-                      <p>
-                        <strong>{counts.pending}</strong> pending pickup request(s) visible to your
-                        account.
-                      </p>
-                    )}
-                    {counts.accepted > 0 && (
-                      <p>
-                        {counts.accepted} accepted request(s). Acceptance does not confirm boarding.
-                      </p>
-                    )}
-                    <p>
-                      Stop order: {point.stop_order} · {guide.name}
-                    </p>
-                  </Popup>
-                  {(counts.pending > 0 || origin || destination) && (
-                    <Tooltip permanent direction="bottom" offset={[0, 1]} className="stop-label">
-                      {counts.pending
-                        ? `${counts.pending} waiting request${counts.pending === 1 ? '' : 's'}`
-                        : origin
-                          ? 'Origin'
-                          : 'Destination'}
-                    </Tooltip>
-                  )}
-                </Marker>
-              )
-            }),
-          )}
+          {waitingRequests
+            .filter(
+              (r) =>
+                (r.status === 'pending' || r.status === 'accepted') &&
+                activeTrips.some((t) => t.id === r.trip_id) &&
+                validCoordinate(r.pickup_latitude, r.pickup_longitude),
+            )
+            .map((r) => (
+              <Marker
+                key={r.id}
+                position={[Number(r.pickup_latitude), Number(r.pickup_longitude)]}
+                title={
+                  r.status === 'pending' ? 'Pending passenger pickup' : 'Accepted passenger pickup'
+                }
+                icon={simpleIcon(r.status === 'pending' ? 'waiting' : 'accepted', personSvg)}
+              >
+                <Popup>
+                  <strong>{r.pickup_address || 'Selected pickup location'}</strong>
+                  <p>
+                    {Number(r.pickup_latitude).toFixed(6)}, {Number(r.pickup_longitude).toFixed(6)}
+                  </p>
+                  <p>{r.status} - driver review required for safe stopping.</p>
+                </Popup>
+              </Marker>
+            ))}
           {locations.map((location) => {
             const trip = activeTrips.find((t) => t.id === location.trip_id)!
             const bus = feed.buses.find((b) => b.id === trip.bus_id)
@@ -443,7 +379,7 @@ export function BusMap({
                   {!fresh && <p>Last known position only. The current bus position is unknown.</p>}
                   {far && (
                     <p className="danger-text">
-                      Reported position is far from the route stops. Check the device location.
+                      Reported position is far from the route endpoints. Check the device location.
                     </p>
                   )}
                   <p>
@@ -529,9 +465,6 @@ export function BusMap({
             <Users size={16} className="legend-waiting" /> Waiting request
           </span>
           <span>
-            <Flag size={15} /> Pickup stop
-          </span>
-          <span>
             <Navigation size={15} className="legend-you" /> You
           </span>
           <span>
@@ -565,29 +498,29 @@ export function BusMap({
         </div>
         <p className="map-route-note">
           {guides.some((g) => g.approved)
-            ? 'Green line: operator-reviewed bus route. Pickups use approved stops only.'
+            ? 'Green line: operator-reviewed bus route. Pickup locations need driver review.'
             : ''}{' '}
-          {Object.keys(roadRoutes).some((key) =>
+          {guides.some((g) => !g.approved && g.roadPath) ||
+          Object.keys(roadRoutes).some((key) =>
             guides.some((g) => routeKey(g.routeId) === key && !g.approved),
           )
             ? 'Blue line: suggested driving path, not approved for bus service. Routing: OSRM / OpenStreetMap.'
             : hasLine
-              ? 'Dashed line: endpoint and stop guide, not a road route.'
-              : 'A route guide needs verified endpoints or at least two ordered stops.'}
+              ? 'Dashed line: endpoint guide, not a road route.'
+              : 'A route guide needs confirmed endpoints.'}
           {!routingConfigured() &&
             !guides.every((g) => g.approved) &&
             ' Road routing is not configured.'}
         </p>
         {guides.some((g) => !g.approved) && (
           <p className="map-route-note">
-            Routes awaiting operator review cannot accept pickup requests. Driving directions do not
-            establish bus approval.
+            Suggested driving directions do not establish bus approval or safe stopping.
           </p>
         )}
         {(pending > 0 || waitingRequests.some((r) => r.status === 'accepted')) && (
           <p className="map-route-note">
-            Request markers show designated stops visible to your account, not passengers’ device
-            locations.
+            Pickup pins are one-time requested positions visible only to the passenger and assigned
+            driver.
           </p>
         )}
         {missing.length > 0 && (

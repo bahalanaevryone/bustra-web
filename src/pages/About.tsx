@@ -19,7 +19,7 @@ export function About() {
           <h2>Open to everyone</h2>
           <p>
             Browse the map, routes, and schedules without creating an account. Register when you’re
-            ready to request a pickup at a designated stop.
+            ready to choose a pickup pin and request driver review.
           </p>
         </article>
         <article className="card">

@@ -1,7 +1,8 @@
 import { PGlite } from '@electric-sql/pglite'
 import { readFile, readdir } from 'node:fs/promises'
 import assert from 'node:assert/strict'
-import {testDynamicRoutes} from './test-dynamic-routes.mjs'
+import { testDynamicRoutes } from './test-dynamic-routes.mjs'
+import { testPassengerPickups } from './test-passenger-pickups.mjs'
 
 const db = new PGlite()
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -93,7 +94,12 @@ try {
     [trip, bus, route, driver, admin],
   )
   for (const file of (await readdir(new URL('../supabase/migrations/', import.meta.url)))
-    .filter((file) => file.endsWith('.sql') && !file.startsWith('202611200001'))
+    .filter(
+      (file) =>
+        file.endsWith('.sql') &&
+        !file.startsWith('202611200001') &&
+        !file.includes('dynamic_passenger_pickups'),
+    )
     .sort()) {
     const migration = await readFile(
       new URL('../supabase/migrations/' + file, import.meta.url),
@@ -792,7 +798,22 @@ try {
     }
     assert.equal(Number(await value("select count(*) from pg_tables where schemaname='public'")), 7)
   })
-  await testDynamicRoutes({db,test,as,value,denied,admin,otherDriver,passenger})
+  await testDynamicRoutes({ db, test, as, value, denied, admin, otherDriver, passenger })
+  await testPassengerPickups({
+    db,
+    test,
+    as,
+    value,
+    denied,
+    admin,
+    passenger,
+    driver,
+    otherDriver,
+    otherPassenger,
+    bus,
+    route,
+    trip,
+  })
   console.log(
     `\n${passed} PostgreSQL security and integrity checks passed. Hosted Supabase and concurrent multi-connection load are separate checks.`,
   )

@@ -54,4 +54,4 @@ export function errorMessage(error: unknown) {
       ? String(error.message)
       : 'Something went wrong. Please try again.'
 }
-export const emptyFeed = { buses: [], routes: [], pickup_points: [], trips: [], locations: [] }
+export const emptyFeed = { buses: [], routes: [], trips: [], locations: [] }

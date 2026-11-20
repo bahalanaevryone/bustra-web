@@ -5,14 +5,12 @@ import {
   Polyline,
   Popup,
   TileLayer,
-  CircleMarker,
   useMap,
   useMapEvents,
 } from 'react-leaflet'
 import { divIcon, latLngBounds } from 'leaflet'
 import type { Coordinate } from '../map/routeGeometry'
 import type { SelectedLocation } from './scheduleRoutes'
-import type { PickupPoint } from '../../types'
 export type Endpoint = 'origin' | 'destination'
 function Controls({
   points,
@@ -47,7 +45,6 @@ export function ScheduleMap({
   destination,
   path,
   approved,
-  stops,
   active,
   onPlace,
   disabled = false,
@@ -56,7 +53,6 @@ export function ScheduleMap({
   destination: SelectedLocation | null
   path: Coordinate[] | null
   approved: boolean
-  stops: PickupPoint[]
   active: Endpoint | null
   onPlace: (kind: Endpoint, p: Coordinate) => void
   disabled?: boolean
@@ -150,23 +146,6 @@ export function ScheduleMap({
             </Marker>
           )
         })}
-        {stops.map((p) => (
-          <CircleMarker
-            key={p.id}
-            center={[Number(p.latitude), Number(p.longitude)]}
-            radius={6}
-            pathOptions={{ color: approved ? '#237b54' : '#75869b', fillOpacity: 1 }}
-          >
-            <Popup>
-              {p.name}
-              <p>
-                {approved
-                  ? 'Designated stop on the existing reviewed route.'
-                  : 'Stop awaiting route review; pickup is not enabled.'}
-              </p>
-            </Popup>
-          </CircleMarker>
-        ))}
       </MapContainer>
       {active && (
         <div className="schedule-map-instruction">

@@ -1,5 +1,7 @@
 # Verification record
 
+The latest passenger-pin update supersedes historical stop-only rules described below. See [Dynamic pickups](dynamic-pickups.md) for the current schema, test process and limitations.
+
 Verified on 20 November 2026 using Node 24, Chrome, and embedded PostgreSQL. Source was pushed to GitHub and Pages hosting configured. The automatic-route upgrade was applied directly to the authorized hosted project using the Supabase CLI. The project owner applied the hosted migration and seed, created accounts, and reported successful signup after fixing SMTP. Automated database mutation tests use local PGlite; browser mutations use intercepted fixtures, not the hosted database.
 
 | Check                           | Outcome and scope                                                                                                                                                                                                                                                                                                                 |
@@ -33,3 +35,11 @@ Security advisors flag the deliberately callable security-definer public project
 ## Dynamic-location update
 
 Migration 20261120055359 adds canonical coordinate fields without removing earlier data. Existing legacy RPCs stay private; the new public wrapper requires numeric coordinates and explicit confirmation for dynamic locations and preserves pickup approval safeguards. Geocoding is Photon-compatible; public Nominatim autocomplete is prohibited in code. The hosted RPC smoke check verified near-position reuse, distant equal-label separation and confirmation rejection inside a rolled-back transaction; original counts remained 2 routes, 1 trip and 3 stops. A real Photon city query returned HTTP 200 with browser CORS enabled for the app origin. Advisor findings did not change after migration. The 34-case browser regression suite and 2 additional desktop/mobile existing-schedule checks passed, including exact departure preservation.
+
+## Dynamic passenger-pin update
+
+The 20261120104656 migration is applied to hosted Supabase and recorded in migration history. Integrity fingerprints match before/after for the existing request's identity/status/timestamps and the archived operator catalog: 1 request, 3 archived points, 4 routes and 3 trips retained. The schema now has exactly six public tables with RLS enabled. Pickup requests remain in the Realtime publication; guest public_feed excludes requests and route archives are outside browser column grants. A hosted transaction exercised real passenger submission, assigned-driver rejection, owner status reads and admin coordinate denial, then rolled back every test mutation.
+
+Current validation: TypeScript and production build passed, 22 unit tests passed, 59 PostgreSQL migration/security/integrity tests passed, and all 46 desktop/mobile browser scenarios passed. Browser scenarios use controlled backend/provider responses, intercept community map tiles, and test status polling separately from actual hosted two-device Realtime delivery. The local run used a fresh Vite test port because a pre-existing server on the default test port retained stale modules.
+
+Security/performance advisors were rerun. Remaining warnings concern deliberately callable, guarded security-definer APIs and the pre-existing leaked-password-protection setting; no performance warnings were reported. RPC guards, fixed search paths and execute grants were tested. Actual Android location accuracy and two-device Realtime delivery still need the device procedure in [the pickup guide](dynamic-pickups.md).

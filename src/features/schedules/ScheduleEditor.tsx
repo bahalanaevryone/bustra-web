@@ -65,7 +65,6 @@ export function ScheduleEditor({
   const guide = match
     ? getRouteGuides({
         routes: [match],
-        pickup_points: data.pickup_points,
         trips: [],
         buses: [],
         locations: [],
@@ -118,7 +117,7 @@ export function ScheduleEditor({
         key: previewKey,
         phase: 'approved',
         path: reviewed,
-        message: 'Existing operator-reviewed bus path. Designated pickup rules remain in effect.',
+        message: 'Existing operator-reviewed bus path. Passenger pins require driver review.',
       })
       return
     }
@@ -144,7 +143,6 @@ export function ScheduleEditor({
       const points = guide?.ordered
         ? ([
             [a.lat, a.lng],
-            ...guide.stops.map((p) => [Number(p.latitude), Number(p.longitude)]),
             [b.lat, b.lng],
           ] as Coordinate[])
         : ([
@@ -351,7 +349,6 @@ export function ScheduleEditor({
               destination={destination}
               path={current.path}
               approved={current.phase === 'approved'}
-              stops={guide?.stops || []}
               active={active}
               onPlace={place}
               disabled={locked}
@@ -397,7 +394,7 @@ export function ScheduleEditor({
             )}
             <p className="form-help">
               {match
-                ? 'Matching route and its designated stops will be reused when the server validates the positions.'
+                ? 'Matching route will be reused when the server validates the positions.'
                 : 'New routes remain pending operator review. Pickup points are never created automatically.'}
             </p>
           </section>
@@ -478,8 +475,8 @@ export function ScheduleEditor({
               <span>I verified both location pins and reviewed the route information above.</span>
             </label>
             <p className="form-help">
-              This confirmation does not approve a bus route. Passenger pickups require an
-              operator-reviewed path and designated stops.
+              This confirmation does not approve a bus route. Drivers must review passenger pickup
+              pins for safe and permitted stopping.
             </p>
             {origin && destination && !valid && (
               <p className="danger-text">

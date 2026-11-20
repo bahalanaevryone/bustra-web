@@ -9,7 +9,11 @@ import { date, errorMessage, time } from '../lib/utils'
 export function Account() {
   const { user, profile, refresh: refreshProfile } = useAuth()
   const { feed } = useData()
-  const [requests, setRequests] = useState<PickupRequest[]>([])
+  const [requestState, setRequests] = useState<{ owner: string; rows: PickupRequest[] }>({
+    owner: '',
+    rows: [],
+  })
+  const requests = requestState.owner === user?.id ? requestState.rows : []
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -22,7 +26,7 @@ export function Account() {
       .eq('user_id', user!.id)
       .order('requested_at', { ascending: false })
     if (error) setError(error.message)
-    else setRequests(data as PickupRequest[])
+    else setRequests({ owner: user!.id, rows: data as PickupRequest[] })
     setLoading(false)
   }, [user])
   useEffect(() => {
@@ -113,10 +117,7 @@ export function Account() {
               return (
                 <article className="request-card" key={r.id}>
                   <div className="row-between">
-                    <strong>
-                      {feed.pickup_points.find((p) => p.id === r.pickup_point_id)?.name ||
-                        'Pickup point'}
-                    </strong>
+                    <strong>{r.pickup_address || 'Selected pickup location'}</strong>
                     <Status value={r.status} />
                   </div>
                   <p>
@@ -126,11 +127,16 @@ export function Account() {
                   <small>
                     Requested {date(r.requested_at)}, {time(r.requested_at)} · PHT
                   </small>
-                  {r.status === 'pending' && (
-                    <button className="text-button danger-text" onClick={() => setCancel(r.id)}>
-                      Cancel request
-                    </button>
-                  )}
+                  {r.response_note && <p>{r.response_note}</p>}
+                  <p>
+                    {Number(r.pickup_latitude).toFixed(6)}, {Number(r.pickup_longitude).toFixed(6)}
+                  </p>
+                  {(r.status === 'pending' || r.status === 'accepted') &&
+                    trip?.status === 'active' && (
+                      <button className="text-button danger-text" onClick={() => setCancel(r.id)}>
+                        Cancel request
+                      </button>
+                    )}
                   {r.status === 'accepted' && (
                     <p className="form-help">
                       The driver acknowledged your request. Boarding remains subject to conditions

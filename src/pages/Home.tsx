@@ -174,7 +174,6 @@ export function Home() {
                         locations: feed.locations.filter((l) =>
                           feed.trips.some((t) => t.id === l.trip_id && t.route_id === routeId),
                         ),
-                        pickup_points: feed.pickup_points.filter((p) => p.route_id === routeId),
                       }
                     : feed
                 }
@@ -326,7 +325,7 @@ export function Home() {
                 <RouteIcon />
               </span>
               <h3>Choose your pickup point</h3>
-              <p>Sign in, select a designated stop, and send your pickup request.</p>
+              <p>Sign in, choose your pickup pin on the map, and send your request.</p>
             </article>
             <article>
               <span className="how-icon">
