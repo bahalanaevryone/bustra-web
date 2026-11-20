@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
+test.beforeEach(async ({ page }) => {
+  await page.route('https://tile.openstreetmap.org/**', (route) => route.abort())
+})
 async function offlineBackend(page: Page) {
   await page.route('**/*.supabase.co/**', (route) =>
     route.fulfill({

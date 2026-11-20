@@ -38,9 +38,12 @@ export function getRouteGuides(
         if (!coordinates.length || distanceKm(coordinates[coordinates.length - 1], p) > 0.001)
           coordinates.push(p)
       }
-      add(route.origin_latitude, route.origin_longitude)
+      add(route.origin_lat ?? route.origin_latitude, route.origin_lng ?? route.origin_longitude)
       for (const p of stops) add(p.latitude, p.longitude)
-      add(route.destination_latitude, route.destination_longitude)
+      add(
+        route.destination_lat ?? route.destination_latitude,
+        route.destination_lng ?? route.destination_longitude,
+      )
       const ordered =
         coordinates.length >= 2 && new Set(stops.map((p) => p.stop_order)).size === stops.length
       const roadPath =

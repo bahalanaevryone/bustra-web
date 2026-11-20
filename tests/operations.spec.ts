@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
+test.beforeEach(async ({ page }) => {
+  await page.route('https://tile.openstreetmap.org/**', (route) => route.abort())
+})
 
 const uid = '00000000-0000-4000-8000-000000000001'
 const employeeId = '00000000-0000-4000-8000-000000000002'
@@ -38,6 +41,10 @@ async function mockAccount(page: Page, role: 'admin' | 'employee', assigned = tr
         route_name: 'TEST route',
         origin: 'Test origin',
         destination: 'Test destination',
+        origin_lat: 13.22,
+        origin_lng: 120.59,
+        destination_lat: 13.23,
+        destination_lng: 120.6,
         is_approved: true,
         road_path: [
           [13.22, 120.59],
@@ -359,21 +366,50 @@ test('map keeps an honest stop guide when road routing fails and no bus GPS exis
   await expect(map.locator('path.leaflet-interactive[stroke-dasharray="9 9"]')).toHaveCount(1)
 })
 
-test('employee schedule has six fields, generates the route name and sends the initial count', async ({
+test('employee schedule searches new addresses, previews roads and requires confirmation', async ({
   page,
 }, info) => {
   await mockAccount(page, 'employee')
+  await page.route('https://photon.komoot.io/**', (route) => {
+    const q = new URL(route.request().url()).searchParams.get('q') || ''
+    const coordinates = q.startsWith('New origin') ? [120.596, 13.2233] : [120.601, 13.237]
+    return route.fulfill({
+      json: { features: [{ geometry: { type: 'Point', coordinates }, properties: { name: q } }] },
+    })
+  })
+  await page.route('https://router.project-osrm.org/**', (route) => {
+    const coordinates = decodeURIComponent(
+      new URL(route.request().url()).pathname.split('/').pop()!,
+    )
+      .split(';')
+      .map((p) => p.split(',').map(Number))
+    return route.fulfill({
+      json: { code: 'Ok', routes: [{ geometry: { coordinates }, distance: 1500, duration: 200 }] },
+    })
+  })
   await page.goto('/employee?tab=trips')
   await page.getByRole('button', { name: 'Add schedule', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByLabel('Route name', { exact: true })).toHaveCount(0)
   await expect(dialog.getByLabel('Route', { exact: true })).toHaveCount(0)
-  await expect(dialog.locator('input,select')).toHaveCount(6)
-  await dialog.getByRole('combobox', { name: 'Origin', exact: true }).selectOption('Test origin')
-  await dialog.getByRole('combobox', { name: 'Destination', exact: true }).selectOption('Test destination')
-  await expect(dialog.getByRole('status')).toContainText('Test origin → Test destination')
+  await expect(dialog.locator('select')).toHaveCount(2)
+  await dialog.getByRole('combobox', { name: 'Origin', exact: true }).fill('New origin terminal')
+  await dialog.getByRole('option', { name: /New origin terminal/ }).click()
+  await dialog
+    .getByRole('combobox', { name: 'Destination', exact: true })
+    .fill('New destination landmark')
+  await dialog.getByRole('option', { name: /New destination landmark/ }).click()
+  await expect(dialog.locator('.schedule-route-name')).toContainText(
+    'New origin terminal → New destination landmark',
+  )
+  await expect(dialog.locator('.schedule-route-status')).toContainText('Suggested road path')
+  await expect(dialog.locator('.schedule-pin-origin')).toHaveCount(1)
+  await expect(dialog.locator('.schedule-pin-destination')).toHaveCount(1)
+  await expect(dialog.getByRole('button', { name: 'Save Schedule', exact: true })).toBeDisabled()
   await dialog.getByRole('combobox', { name: 'Assigned Bus', exact: true }).selectOption(busId)
-  await dialog.getByRole('combobox', { name: 'Assigned Driver', exact: true }).selectOption(employeeId)
+  await dialog
+    .getByRole('combobox', { name: 'Assigned Driver', exact: true })
+    .selectOption(employeeId)
   await dialog.getByLabel('Departure Date and Time', { exact: true }).fill('2026-11-25T08:00')
   await dialog.getByLabel('Initial Passenger Count', { exact: true }).fill('41')
   expect(
@@ -382,18 +418,28 @@ test('employee schedule has six fields, generates the route name and sends the i
       .evaluate((el: HTMLInputElement) => el.validity.rangeOverflow),
   ).toBe(true)
   await dialog.getByLabel('Initial Passenger Count', { exact: true }).fill('7')
+  await dialog
+    .getByRole('checkbox', {
+      name: 'I verified both location pins and reviewed the route information above.',
+    })
+    .check()
   await noOverflow(page)
   await dialog.screenshot({ path: `.artifacts/schedule-auto-${info.project.name}.png` })
   const request = page.waitForRequest((r) => r.url().endsWith('/rpc/manage_trip'))
-  await dialog.getByRole('button', { name: 'Save changes' }).click()
+  await dialog.getByRole('button', { name: 'Save Schedule', exact: true }).click()
   const body = (await request).postDataJSON()
   expect(body.p_id).toBe(null)
   expect(body.p_data).toMatchObject({
-    origin: 'Test origin',
-    destination: 'Test destination',
+    origin: 'New origin terminal',
+    destination: 'New destination landmark',
+    origin_lat: 13.2233,
+    origin_lng: 120.596,
+    destination_lat: 13.237,
+    destination_lng: 120.601,
+    locations_confirmed: true,
     bus_id: busId,
     driver_id: employeeId,
-    initial_passenger_count: '7',
+    initial_passenger_count: 7,
     status: 'scheduled',
   })
   expect(body.p_data).not.toHaveProperty('route_name')
@@ -455,5 +501,164 @@ test('administrator reviews a road path before enabling bus-route pickups', asyn
     [13.225, 120.595],
     [13.23, 120.6],
   ])
+  await expect(dialog).toHaveCount(0)
+})
+
+test('map selection preserves custom coordinates when no address or road is available', async ({
+  page,
+}, info) => {
+  await mockAccount(page, 'employee')
+  await page.route('https://photon.komoot.io/**', (r) => r.fulfill({ json: { features: [] } }))
+  await page.route('https://router.project-osrm.org/**', (r) =>
+    r.fulfill({ status: 503, body: 'unavailable' }),
+  )
+  await page.goto('/employee?tab=trips')
+  await page.getByRole('button', { name: 'Add schedule', exact: true }).click()
+  const dialog = page.getByRole('dialog'),
+    map = dialog.locator('.schedule-route-map')
+  await dialog.getByRole('combobox', { name: 'Origin', exact: true }).fill('Unmatched location')
+  await expect(dialog.getByText('No matching addresses.', { exact: false })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Save Schedule', exact: true })).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Choose on Map for Origin', exact: true }).click()
+  if (info.project.name === 'mobile') await map.tap({ position: { x: 125, y: 170 } })
+  else await map.click({ position: { x: 125, y: 170 } })
+  await expect(dialog.getByLabel('Origin location label', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('No nearby address found.', { exact: false })).toBeVisible()
+  await dialog.getByLabel('Origin location label', { exact: true }).fill('TEST custom origin pin')
+  await dialog.getByRole('button', { name: 'Choose on Map for Destination', exact: true }).click()
+  if (info.project.name === 'mobile') await map.tap({ position: { x: 215, y: 190 } })
+  else await map.click({ position: { x: 215, y: 190 } })
+  await dialog
+    .getByLabel('Destination location label', { exact: true })
+    .fill('TEST custom destination pin')
+  await expect(dialog.locator('.schedule-route-status')).toContainText('No road route is available')
+  await expect(map.locator('path.leaflet-interactive')).toHaveCount(0)
+  const destinationBefore = await dialog.locator('.selected-location > p > span').nth(1).innerText()
+  const destinationMarker = dialog.locator('[title="Destination marker"]')
+  await destinationMarker.scrollIntoViewIfNeeded()
+  const markerBox = await destinationMarker.boundingBox()
+  expect(markerBox).toBeTruthy()
+  await page.mouse.move(markerBox!.x + 18, markerBox!.y + 18)
+  await page.mouse.down()
+  await page.mouse.move(markerBox!.x + 38, markerBox!.y + 13, { steps: 8 })
+  await page.mouse.up()
+  await expect(dialog.locator('.selected-location > p > span').nth(1)).not.toHaveText(
+    destinationBefore,
+  )
+  await expect(dialog.locator('.schedule-route-status')).toContainText('No road route is available')
+  await dialog.getByRole('combobox', { name: 'Assigned Bus', exact: true }).selectOption(busId)
+  await dialog
+    .getByRole('combobox', { name: 'Assigned Driver', exact: true })
+    .selectOption(employeeId)
+  await dialog.getByLabel('Departure Date and Time', { exact: true }).fill('2026-11-25T09:00')
+  const confirm = dialog.getByRole('checkbox', {
+    name: 'I verified both location pins and reviewed the route information above.',
+  })
+  await confirm.check()
+  const before = await dialog.locator('.selected-location > p > span').first().innerText()
+  await dialog.locator('[title="Origin marker"]').focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(confirm).not.toBeChecked()
+  await expect(dialog.getByRole('button', { name: 'Save Schedule', exact: true })).toBeDisabled()
+  await expect(dialog.locator('.schedule-route-status')).toContainText('No road route is available')
+  const origin = (await dialog.locator('.selected-location > p > span').first().innerText())
+    .split(',')
+    .map(Number)
+  const destination = (await dialog.locator('.selected-location > p > span').nth(1).innerText())
+    .split(',')
+    .map(Number)
+  expect(origin[1]).toBeCloseTo(Number(before.split(',')[1]) + 0.0001, 6)
+  await confirm.check()
+  await noOverflow(page)
+  const request = page.waitForRequest((r) => r.url().endsWith('/rpc/manage_trip'))
+  await dialog.getByRole('button', { name: 'Save Schedule', exact: true }).click()
+  expect((await request).postDataJSON().p_data).toMatchObject({
+    origin: 'TEST custom origin pin',
+    destination: 'TEST custom destination pin',
+    origin_lat: origin[0],
+    origin_lng: origin[1],
+    destination_lat: destination[0],
+    destination_lng: destination[1],
+    locations_confirmed: true,
+  })
+  await expect(dialog).toHaveCount(0)
+})
+
+test('editing a selected address clears its coordinates and provider errors allow map fallback', async ({
+  page,
+}) => {
+  await mockAccount(page, 'employee')
+  let queries = 0
+  await page.route('https://photon.komoot.io/**', (r) => {
+    queries++
+    const q = new URL(r.request().url()).searchParams.get('q') || ''
+    if (q.includes('unavailable')) return r.fulfill({ status: 429 })
+    return r.fulfill({
+      json: {
+        features: [
+          {
+            geometry: { type: 'Point', coordinates: [120.596, 13.2233] },
+            properties: { name: 'TEST search result' },
+          },
+        ],
+      },
+    })
+  })
+  await page.goto('/employee?tab=trips')
+  await page.getByRole('button', { name: 'Add schedule', exact: true }).click()
+  const dialog = page.getByRole('dialog'),
+    input = dialog.getByRole('combobox', { name: 'Origin', exact: true })
+  await input.fill('a')
+  await page.waitForTimeout(900)
+  expect(queries).toBe(0)
+  await input.fill('Search terminal')
+  await dialog.getByRole('option', { name: /TEST search result/ }).click()
+  await expect(dialog.locator('.schedule-pin-origin')).toHaveCount(1)
+  const limited = page.waitForResponse(
+    (response) => response.url().includes('photon.komoot.io') && response.status() === 429,
+  )
+  await input.fill('unavailable location')
+  await expect(dialog.locator('.schedule-pin-origin')).toHaveCount(0)
+  await limited
+  await expect(dialog.getByText('Address search is busy.', { exact: false })).toBeVisible()
+  await expect(
+    dialog.getByRole('button', { name: 'Choose on Map for Origin', exact: true }),
+  ).toBeEnabled()
+  await expect(dialog.getByRole('button', { name: 'Save Schedule', exact: true })).toBeDisabled()
+})
+
+test('editing an existing schedule preserves its exact departure and reuses reviewed coordinates', async ({
+  page,
+}) => {
+  const records = await mockAccount(page, 'employee')
+  records.trips[0].status = 'scheduled'
+  records.trips[0].departure_at = '2026-11-25T00:00:23.123456+00:00'
+  await page.goto('/employee?tab=trips')
+  await page.getByRole('button', { name: `Edit schedule ${tripId}`, exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.locator('.schedule-route-status')).toContainText(
+    'Existing operator-reviewed bus path',
+  )
+  await expect(dialog.getByLabel('Initial Passenger Count', { exact: true })).toHaveAttribute(
+    'readonly',
+    '',
+  )
+  await dialog
+    .getByRole('checkbox', {
+      name: 'I verified both location pins and reviewed the route information above.',
+    })
+    .check()
+  const request = page.waitForRequest((r) => r.url().endsWith('/rpc/manage_trip'))
+  await dialog.getByRole('button', { name: 'Save Schedule', exact: true }).click()
+  const body = (await request).postDataJSON()
+  expect(body.p_id).toBe(tripId)
+  expect(body.p_data).toMatchObject({
+    departure_at: '2026-11-25T00:00:23.123456+00:00',
+    origin_lat: 13.22,
+    origin_lng: 120.59,
+    destination_lat: 13.23,
+    destination_lng: 120.6,
+    locations_confirmed: true,
+  })
   await expect(dialog).toHaveCount(0)
 })

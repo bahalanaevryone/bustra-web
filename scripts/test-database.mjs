@@ -1,6 +1,7 @@
 import { PGlite } from '@electric-sql/pglite'
 import { readFile, readdir } from 'node:fs/promises'
 import assert from 'node:assert/strict'
+import {testDynamicRoutes} from './test-dynamic-routes.mjs'
 
 const db = new PGlite()
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -791,6 +792,7 @@ try {
     }
     assert.equal(Number(await value("select count(*) from pg_tables where schemaname='public'")), 7)
   })
+  await testDynamicRoutes({db,test,as,value,denied,admin,otherDriver,passenger})
   console.log(
     `\n${passed} PostgreSQL security and integrity checks passed. Hosted Supabase and concurrent multi-connection load are separate checks.`,
   )

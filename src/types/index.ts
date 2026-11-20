@@ -18,6 +18,10 @@ export interface Route {
   route_name: string
   origin: string
   destination: string
+  origin_lat?: number | null
+  origin_lng?: number | null
+  destination_lat?: number | null
+  destination_lng?: number | null
   origin_latitude?: number | null
   origin_longitude?: number | null
   destination_latitude?: number | null
