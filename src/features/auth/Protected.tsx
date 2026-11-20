@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Link, Navigate, useLocation } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from './AuthProvider'
 import type { Role } from '../../types'
 import { Loading, Notice } from '../../components/ui'
@@ -30,13 +30,16 @@ export function Protected({ roles, children }: { roles?: Role[]; children: React
     )
   if (roles && !roles.includes(profile.role))
     return (
-      <div className="container page-space">
-        <h1>This page is for authorised staff.</h1>
-        <p>Your current account does not have access.</p>
-        <Link className="button button-primary" to="/">
-          Return home
-        </Link>
-      </div>
+      <Navigate
+        to={
+          profile.role === 'admin'
+            ? '/admin'
+            : profile.role === 'employee'
+              ? '/employee'
+              : '/requests'
+        }
+        replace
+      />
     )
   return children
 }

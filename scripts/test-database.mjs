@@ -3,6 +3,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import { testDynamicRoutes } from './test-dynamic-routes.mjs'
 import { testPassengerPickups } from './test-passenger-pickups.mjs'
+import { testRoleManagement } from './test-role-management.mjs'
 
 const db = new PGlite()
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -41,7 +42,7 @@ try {
   await db.exec(`
     create role anon nologin; create role authenticated nologin;
     create schema auth;
-    create table auth.users(id uuid primary key,raw_user_meta_data jsonb not null default '{}');
+    create table auth.users(id uuid primary key,raw_user_meta_data jsonb not null default '{}',email_confirmed_at timestamptz default now(),phone_confirmed_at timestamptz,banned_until timestamptz,deleted_at timestamptz);
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
     grant usage on schema auth to anon,authenticated;
     grant execute on function auth.uid() to anon,authenticated;
@@ -98,7 +99,8 @@ try {
       (file) =>
         file.endsWith('.sql') &&
         !file.startsWith('202611200001') &&
-        !file.includes('dynamic_passenger_pickups'),
+        !file.includes('dynamic_passenger_pickups') &&
+        !file.includes('complete_user_role_management'),
     )
     .sort()) {
     const migration = await readFile(
@@ -813,6 +815,18 @@ try {
     bus,
     route,
     trip,
+  })
+  await testRoleManagement({
+    db,
+    test,
+    as,
+    value,
+    denied,
+    admin,
+    passenger,
+    driver,
+    otherDriver,
+    otherPassenger,
   })
   console.log(
     `\n${passed} PostgreSQL security and integrity checks passed. Hosted Supabase and concurrent multi-connection load are separate checks.`,

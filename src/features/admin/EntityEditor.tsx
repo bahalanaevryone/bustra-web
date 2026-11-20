@@ -7,6 +7,7 @@ import { errorMessage } from '../../lib/utils'
 import { ScheduleEditor } from '../schedules/ScheduleEditor'
 import { RouteReview } from './RouteReview'
 import type { Coordinate } from '../map/routeGeometry'
+import { UserEditor } from './UserEditor'
 export const entityNames: Record<Entity, string> = {
   profiles: 'user',
   buses: 'bus',
@@ -15,6 +16,16 @@ export const entityNames: Record<Entity, string> = {
 }
 export type RecordData = Record<string, string | number | boolean | null | undefined>
 export function EntityEditor(props: Parameters<typeof RecordEditor>[0]) {
+  if (props.entity === 'profiles') {
+    const profile = props.data.profiles.find((p) => p.id === props.record?.id)
+    return profile ? (
+      <UserEditor profile={profile} onClose={props.onClose} onSaved={props.onSaved} />
+    ) : (
+      <Modal title="Account unavailable" onClose={props.onClose}>
+        <Notice tone="error">Refresh User Management and select an existing account.</Notice>
+      </Modal>
+    )
+  }
   return props.entity === 'trips' ? (
     <ScheduleEditor
       record={props.record}
@@ -56,12 +67,7 @@ function RecordEditor({
       <label className="field" key={name}>
         <span>{label}</span>
         {options ? (
-          <select
-            name={name}
-            defaultValue={String(value)}
-            required
-            disabled={name === 'role' && record?.role === 'admin'}
-          >
+          <select name={name} defaultValue={String(value)} required>
             <option value="">Choose…</option>
             {options.map((o) => (
               <option key={o.value} value={o.value}>
@@ -120,8 +126,6 @@ function RecordEditor({
         values.road_path = roadPath
       }
       await rpc('admin_save', { p_entity: entity, p_id: record?.id || null, p_data: values })
-      if (entity === 'profiles' && values.role && values.role !== record?.role)
-        await rpc('set_employee_role', { p_user: record?.id, p_role: values.role })
       await onSaved()
       onClose()
     } catch (e) {
@@ -166,25 +170,6 @@ function RecordEditor({
               path={roadPath}
               onPath={setRoadPath}
             />
-          </>
-        )}
-        {entity === 'profiles' && (
-          <>
-            {field('first_name', 'First name')}
-            {field('last_name', 'Last name')}
-            {field(
-              'role',
-              'Account access',
-              'text',
-              (record?.role === 'admin' ? ['admin'] : ['user', 'employee']).map((v) => ({
-                value: v,
-                label: v,
-              })),
-            )}
-            <p className="form-help">
-              The sole admin cannot be demoted. Reassign unfinished trips before demoting an
-              employee.
-            </p>
           </>
         )}
         {error && <Notice tone="error">{error}</Notice>}

@@ -28,6 +28,7 @@ import { useLocationSharing } from '../hooks/useLocationSharing'
 import { Brand, Empty, Loading, Modal, Notice, Status } from '../components/ui'
 import { BusMap } from '../features/map/BusMap'
 import { EntityEditor, entityNames } from '../features/admin/EntityEditor'
+import { RoleAudit } from '../features/admin/RoleAudit'
 import type { RecordData } from '../features/admin/EntityEditor'
 import type { Entity } from '../types'
 import { rpc } from '../lib/supabase/client'
@@ -682,6 +683,7 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
               </p>
             </section>
           )}
+          {admin && tableEntity === 'profiles' && <RoleAudit profiles={data.profiles} />}
         </main>
         <footer className="dashboard-footer">
           BUSTRA · Operations workspace <span>AI arrival prediction: planned / not trained</span>

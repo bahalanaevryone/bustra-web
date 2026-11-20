@@ -46,11 +46,11 @@ Both endpoints should return OK. A 404 for `public_feed` means the migration is 
 
 The project owner applied the initial migration and development seed, created admin/employee accounts, and confirmed signup after configuring Brevo SMTP. The automatic-route and dynamic-location upgrades were applied using the authenticated Supabase CLI. The management connector lacks project access, but the CLI connection works. Do not rerun the initial migration over existing tables. For a fresh installation, apply every file in `supabase/migrations/` in filename order before creating schedules.
 
-## Create the single admin and employee test accounts
+## Create the first admin and manage account roles
 
 1. After applying the migration, register a normal account through `/register`; verify its email if required.
 2. Copy its exact UUID from **Authentication → Users**.
-3. Open [`supabase/bootstrap-admin.sql`](supabase/bootstrap-admin.sql). Replace `REPLACE_WITH_EXACT_AUTH_USER_UUID` with that UUID, then run it in the trusted SQL Editor. It refuses to run if an admin already exists. No public function can create an admin, and the database protects that sole admin against deletion/demotion.
+3. Open [`supabase/bootstrap-admin.sql`](supabase/bootstrap-admin.sql). Replace `REPLACE_WITH_EXACT_AUTH_USER_UUID` with that UUID, then run it in the trusted SQL Editor. It refuses to run if an admin already exists. Developers bootstrap the first Admin securely. After the role-management migration, authorized active Admins can assign User, Employee or Admin to existing accounts, with confirmation for Admin changes and protection for the last active Admin.
 4. Sign in or refresh. The admin dashboard loads its role from the database. Register two more normal accounts, then promote them to `employee` using **Users → Edit → Account access**. Assign one to a trip to test driver-only controls.
 5. For a passenger test, use a separate registered user account. There are no built-in passwords or fake authenticated accounts.
 
@@ -106,9 +106,13 @@ npm.cmd run test:e2e
 - Browser tests use installed Google Chrome, at desktop and iPhone-sized viewports. They exercise public pages, forms, demo details, filters, guest access, and intended pickup redirects with a controlled backend. Install Chrome or change the Playwright channel for your machine.
 - See [`docs/verification.md`](docs/verification.md) for outcomes and limitations. Live email flows, two-device Realtime delivery, real GPS permissions, and simultaneous multi-connection load need hosted integration checks after schema setup.
 
+## Role management
+
+See [multi-admin role management](docs/role-management.md) for the migration, authorization, private audit history and testing steps. Registration still assigns User, and all three roles share one Login page. Admin target accounts must be verified and not banned/deleted. Reassign unfinished trips before changing an Employee role.
+
 ## Permissions and operations
 
-The database authorises requests independently of the interface. Profiles are private; passengers can update only their own names. Staff can manage schedules; only the assigned employee can start an assigned trip, publish GPS, adjust counts, or answer pickups. Active assignments cannot be hijacked. Admins can start/end trips for management and can grant only `user`/`employee` through the role RPC. Finished schedules are retained as history. Referenced data cannot be deleted accidentally.
+The database authorises requests independently of the interface. Profiles are private; passengers can update only their own names. Staff can manage schedules; only the assigned employee can start an assigned trip, publish GPS, adjust counts, or answer pickups. Active assignments cannot be hijacked. Admins can start/end trips for management and assign `user`, `employee` or `admin` through a guarded atomic operation. Admin privilege changes require confirmation and are recorded in private audit history; the last active Admin cannot be removed. Finished schedules are retained as history. Referenced data cannot be deleted accidentally.
 
 Accounts are created through the shared registration flow. Deleting an Auth account requires trusted project administration and session revocation; the browser has no service-role account deletion or admin creation endpoint. The admin table deliberately does not expose emails from `auth.users`.
 

@@ -78,9 +78,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load()
     }, 15000)
+    const resume = () => {
+      if (document.visibilityState === 'visible') void load()
+    }
+    window.addEventListener('focus', resume)
+    document.addEventListener('visibilitychange', resume)
     return () => {
       disposed = true
       clearInterval(interval)
+      window.removeEventListener('focus', resume)
+      document.removeEventListener('visibilitychange', resume)
       void supabase!.removeChannel(channel)
     }
   }, [user])

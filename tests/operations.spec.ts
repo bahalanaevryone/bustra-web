@@ -79,6 +79,15 @@ async function mockAccount(page: Page, role: 'admin' | 'employee' | 'user', assi
     ],
     locations: [] as { trip_id: string; latitude: number; longitude: number; updated_at: string }[],
   }
+  const audit: {
+    id: number
+    actor_id: string
+    target_id: string
+    old_role: string
+    new_role: string
+    changed_at: string
+    source: string
+  }[] = []
   const user = {
     id: userId,
     aud: 'authenticated',
@@ -113,6 +122,58 @@ async function mockAccount(page: Page, role: 'admin' | 'employee' | 'user', assi
     if (path.startsWith('/rest/v1/rpc/')) {
       const name = path.split('/').pop()
       const body = request.postDataJSON() as Record<string, unknown>
+      if (name === 'role_change_history') return route.fulfill({ json: audit.slice().reverse() })
+      if (name === 'admin_update_user') {
+        const target = records.profiles.find((p) => p.id === body.p_user)
+        if (!target)
+          return route.fulfill({ status: 400, json: { message: 'Registered account not found.' } })
+        const nextRole = String(body.p_role)
+        if (body.p_expected_role !== target.role)
+          return route.fulfill({
+            status: 400,
+            json: {
+              message:
+                'This account role changed since you opened it. Refresh User Management and review it again.',
+            },
+          })
+        if (
+          nextRole !== target.role &&
+          (nextRole === 'admin' || target.role === 'admin') &&
+          body.p_confirm_admin !== true
+        )
+          return route.fulfill({
+            status: 400,
+            json: { message: 'Confirm before assigning or removing Admin privileges.' },
+          })
+        if (
+          target.role === 'admin' &&
+          nextRole !== 'admin' &&
+          records.profiles.filter((p) => p.role === 'admin').length === 1
+        )
+          return route.fulfill({
+            status: 400,
+            json: {
+              message:
+                'The last active administrator cannot be removed or demoted. Assign another active administrator first.',
+            },
+          })
+        if (target.role !== nextRole)
+          audit.push({
+            id: audit.length + 1,
+            actor_id: userId,
+            target_id: target.id,
+            old_role: target.role,
+            new_role: nextRole,
+            changed_at: new Date().toISOString(),
+            source: 'authenticated_admin',
+          })
+        Object.assign(target, {
+          first_name: body.p_first_name,
+          last_name: body.p_last_name,
+          role: nextRole,
+        })
+        return route.fulfill({ status: 204 })
+      }
       if (name === 'public_feed')
         return route.fulfill({
           json: {
@@ -798,4 +859,130 @@ test('passenger sees pending status, polling fallback updates acceptance, and ac
     .getByRole('button', { name: 'Cancel request', exact: true })
     .click()
   await expect(page.locator('.request-card')).toContainText('Cancelled')
+})
+
+test('admin selects all three roles, confirms Admin transitions and sees audit history', async ({
+  page,
+}, info) => {
+  const records = await mockAccount(page, 'admin')
+  records.trips[0].status = 'completed'
+  let writes = 0
+  page.on('request', (r) => {
+    if (r.url().endsWith('/rpc/admin_update_user')) writes++
+  })
+  await page.goto('/admin?tab=profiles')
+  await page.getByRole('button', { name: 'Edit user Test', exact: true }).nth(1).click()
+  let dialog = page.getByRole('dialog')
+  const roles = dialog.getByRole('combobox', { name: 'Account access' })
+  await expect(roles).toBeEnabled()
+  for (const name of ['User', 'Employee', 'Admin'])
+    await expect(roles.getByRole('option', { name, exact: true })).toHaveCount(1)
+  await dialog.getByLabel('First name', { exact: true }).fill('Promoted')
+  await roles.selectOption('admin')
+  await dialog.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(dialog.getByRole('heading', { name: 'Assign Admin privileges?' })).toBeVisible()
+  expect(writes).toBe(0)
+  await dialog.getByRole('button', { name: 'Go back', exact: true }).click()
+  await expect(dialog.getByLabel('First name', { exact: true })).toHaveValue('Promoted')
+  await expect(dialog.getByRole('combobox', { name: 'Account access' })).toHaveValue('admin')
+  await dialog.getByRole('button', { name: 'Save changes', exact: true }).click()
+  const promotion = page.waitForRequest((r) => r.url().endsWith('/rpc/admin_update_user'))
+  await dialog.getByRole('button', { name: 'Confirm Admin access', exact: true }).click()
+  expect((await promotion).postDataJSON()).toMatchObject({
+    p_user: employeeId,
+    p_role: 'admin',
+    p_confirm_admin: true,
+    p_expected_role: 'employee',
+    p_first_name: 'Promoted',
+  })
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Role change history' })).toContainText(
+    'employee → admin',
+  )
+  await page.getByRole('button', { name: 'Edit user Promoted', exact: true }).click()
+  dialog = page.getByRole('dialog')
+  await dialog.getByRole('combobox', { name: 'Account access' }).selectOption('user')
+  await dialog.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(dialog.getByRole('heading', { name: 'Remove Admin privileges?' })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Confirm removal', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(records.profiles[1].role).toBe('user')
+  await page.getByRole('button', { name: 'Edit user Promoted', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Account access' }).selectOption('employee')
+  await page.getByRole('dialog').getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(records.profiles[1].role).toBe('employee')
+  expect(writes).toBe(3)
+  await noOverflow(page)
+  await page.screenshot({ path: `.artifacts/roles-${info.project.name}.png`, fullPage: true })
+})
+
+test('last Admin protection displays the server error without partial profile changes', async ({
+  page,
+}) => {
+  const records = await mockAccount(page, 'admin')
+  await page.goto('/admin?tab=profiles')
+  await page.getByRole('button', { name: 'Edit user Test', exact: true }).first().click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('First name', { exact: true }).fill('Not saved')
+  await dialog.getByRole('combobox', { name: 'Account access' }).selectOption('user')
+  await dialog.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Confirm removal', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('last active administrator')
+  expect(records.profiles[0].role).toBe('admin')
+  expect(records.profiles[0].first_name).toBe('Test')
+  await expect(page).toHaveURL(/\/admin\?tab=profiles/)
+})
+
+test('self-demotion with a second Admin redirects to the correct dashboard', async ({ page }) => {
+  const records = await mockAccount(page, 'admin')
+  records.profiles[1].role = 'admin'
+  await page.goto('/admin?tab=profiles')
+  await page.getByRole('button', { name: 'Edit user Test', exact: true }).first().click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('combobox', { name: 'Account access' }).selectOption('employee')
+  await dialog.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(
+    dialog.getByText('Your own dashboard access will change after saving.'),
+  ).toBeVisible()
+  await dialog.getByRole('button', { name: 'Confirm removal', exact: true }).click()
+  await expect(page).toHaveURL(/\/employee$/)
+  await expect(page.getByRole('heading', { name: 'Employee dashboard', exact: true })).toBeVisible()
+  await page.goto('/admin')
+  await expect(page).toHaveURL(/\/employee$/)
+})
+
+test('changed permissions refresh without another login and redirect away from revoked dashboards', async ({
+  page,
+}) => {
+  const records = await mockAccount(page, 'employee')
+  records.trips[0].status = 'completed'
+  await page.clock.install()
+  await page.goto('/employee')
+  await expect(page.getByRole('heading', { name: 'Employee dashboard', exact: true })).toBeVisible()
+  records.profiles[0].role = 'admin'
+  await page.clock.runFor(15050)
+  await expect(page).toHaveURL(/\/admin$/)
+  await expect(page.getByRole('heading', { name: 'Admin dashboard', exact: true })).toBeVisible()
+  records.profiles[0].role = 'user'
+  await page.clock.runFor(15050)
+  await expect(page).toHaveURL(/\/requests$/)
+  await expect(page.getByRole('heading', { name: 'Hello, Test.' })).toBeVisible()
+})
+
+test('a stale user editor cannot overwrite a role changed by another admin', async ({ page }) => {
+  const records = await mockAccount(page, 'admin')
+  await page.clock.install()
+  await page.goto('/admin?tab=profiles')
+  await page.getByRole('button', { name: 'Edit user Test', exact: true }).nth(1).click()
+  records.profiles[1].role = 'user'
+  await page.clock.runFor(15050)
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('combobox', { name: 'Account access' }).selectOption('admin')
+  await dialog.getByRole('button', { name: 'Save changes', exact: true }).click()
+  const mutation = page.waitForRequest((r) => r.url().endsWith('/rpc/admin_update_user'))
+  await dialog.getByRole('button', { name: 'Confirm Admin access', exact: true }).click()
+  expect((await mutation).postDataJSON().p_expected_role).toBe('employee')
+  await expect(dialog.getByRole('alert')).toContainText('role changed since you opened it')
+  expect(records.profiles[1].role).toBe('user')
 })

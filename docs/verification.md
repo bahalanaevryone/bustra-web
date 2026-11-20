@@ -1,6 +1,6 @@
 # Verification record
 
-The latest passenger-pin update supersedes historical stop-only rules described below. See [Dynamic pickups](dynamic-pickups.md) for the current schema, test process and limitations.
+The latest multi-admin role management and passenger-pin updates supersede historical single-admin and stop-only rules described below. See [role management](role-management.md) for the current role operations and audit safeguards. See [Dynamic pickups](dynamic-pickups.md) for the current schema, test process and limitations.
 
 Verified on 20 November 2026 using Node 24, Chrome, and embedded PostgreSQL. Source was pushed to GitHub and Pages hosting configured. The automatic-route upgrade was applied directly to the authorized hosted project using the Supabase CLI. The project owner applied the hosted migration and seed, created accounts, and reported successful signup after fixing SMTP. Automated database mutation tests use local PGlite; browser mutations use intercepted fixtures, not the hosted database.
 
@@ -43,3 +43,13 @@ The 20261120104656 migration is applied to hosted Supabase and recorded in migra
 Current validation: TypeScript and production build passed, 22 unit tests passed, 59 PostgreSQL migration/security/integrity tests passed, and all 46 desktop/mobile browser scenarios passed. Browser scenarios use controlled backend/provider responses, intercept community map tiles, and test status polling separately from actual hosted two-device Realtime delivery. The local run used a fresh Vite test port because a pre-existing server on the default test port retained stale modules.
 
 Security/performance advisors were rerun. Remaining warnings concern deliberately callable, guarded security-definer APIs and the pre-existing leaked-password-protection setting; no performance warnings were reported. RPC guards, fixed search paths and execute grants were tested. Actual Android location accuracy and two-device Realtime delivery still need the device procedure in [the pickup guide](dynamic-pickups.md).
+
+## Complete user role management
+
+Migration 20261120133309 replaces the single-Admin restriction, preserving the existing 5 profiles, their names/roles and the 6 public tables. The private audit table has RLS and no browser table/sequence grants; only guarded Admin operations can read history. Admin name/role saves are atomic, privilege changes require confirmation, active accounts must be verified and not banned/deleted, and unfinished Employee trips retain reassignment checks. Registration and the shared Login page are unchanged.
+
+Validation: TypeScript and production build passed; 22 unit tests and 77 actual PostgreSQL migration/security/integrity checks passed. All 56 desktop/mobile browser scenarios passed, including the 10 new role cases. The hosted transaction tested User self-promotion denial, Admin confirmation, last-active-Admin protection, legitimate promotions, self-demotion, immediate loss of old privileges and audit creation, then rolled back every mutation. The profile integrity fingerprint matched before/after; production roles remained unchanged and no test audit entries were retained.
+
+Security/performance advisors were rerun. Remaining warning categories concern the existing intentionally callable, guarded security-definer APIs and pre-existing leaked-password protection. New public role APIs use invoker wrappers around checked private implementations. No performance warnings were reported.
+
+Concurrency protection uses a shared transaction advisory lock plus deterministic Admin row locks and bulk-removal checks. An attempted two-CLI overlap smoke check did not exercise contention: concurrent CLI startup rotated the same temporary database login credentials and one connection could not authenticate. The attempt was stopped; it did not change account roles. This is not a completed concurrent multi-connection load test. Browser Realtime/fallback logic is covered by fixtures; actual two-device role propagation remains a manual hosted check.
