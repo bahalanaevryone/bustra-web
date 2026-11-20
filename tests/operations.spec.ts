@@ -236,3 +236,102 @@ test('unassigned employee controls are disabled', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Add one passenger' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Accept', exact: true })).toBeDisabled()
 })
+
+test('map separates the bus, waiting passenger and device, and traces configured stops only', async ({
+  page,
+  context,
+}, info) => {
+  const records = await mockAccount(page, 'employee')
+  records.pickup_points.push({
+    ...records.pickup_points[0],
+    id: '00000000-0000-4000-8000-000000000041',
+    name: 'TEST destination',
+    latitude: 13.23,
+    longitude: 120.6,
+    stop_order: 2,
+  })
+  records.locations.push({
+    trip_id: tripId,
+    latitude: 13.225,
+    longitude: 120.595,
+    updated_at: new Date().toISOString(),
+  })
+  let roadRequests = 0
+  let publishedPositions = 0
+  page.on('request', (request) => {
+    if (request.url().endsWith('/rpc/publish_location')) publishedPositions++
+  })
+  await page.route('https://router.project-osrm.org/**', async (route) => {
+    roadRequests++
+    expect(decodeURIComponent(new URL(route.request().url()).pathname)).toBe(
+      '/route/v1/driving/120.59,13.22;120.6,13.23',
+    )
+    await route.fulfill({
+      json: {
+        code: 'Ok',
+        routes: [
+          {
+            geometry: {
+              coordinates: [
+                [120.59, 13.22],
+                [120.591, 13.225],
+                [120.6, 13.23],
+              ],
+            },
+            distance: 1600,
+            duration: 240,
+          },
+        ],
+      },
+    })
+  })
+  await context.grantPermissions(['geolocation'])
+  await context.setGeolocation({ latitude: 13.226, longitude: 120.596, accuracy: 10 })
+  await page.goto('/employee')
+  const map = page.getByRole('region', { name: 'Bus locations and pickup points' })
+  await expect(map.locator('.bus-plate-label')).toHaveText('TEST 001')
+  await expect(map.locator('.bus-marker.stale')).toHaveCount(0)
+  await expect(map.locator('.map-symbol-waiting')).toHaveCount(1)
+  await expect(map.locator('.map-symbol-destination')).toHaveText('B')
+  await expect(map.locator('path.leaflet-interactive[stroke-dasharray="9 9"]')).toHaveCount(1)
+  expect(roadRequests).toBe(0)
+  await map.getByRole('button', { name: 'Trace road route' }).click()
+  await expect(
+    map.getByText('Solid line: estimated driving route.', { exact: false }),
+  ).toBeVisible()
+  await expect(map.locator('path.leaflet-interactive[stroke-dasharray="9 9"]')).toHaveCount(0)
+  expect(roadRequests).toBe(1)
+  await map.getByRole('button', { name: 'Locate me', exact: true }).click()
+  await expect(map.locator('.map-symbol-you')).toHaveCount(1)
+  expect(publishedPositions).toBe(0)
+  await map.getByRole('button', { name: 'Find bus', exact: true }).click()
+  await page.getByRole('button', { name: 'Accept', exact: true }).click()
+  await expect(map.locator('.map-symbol-waiting')).toHaveCount(0)
+  await expect(map.locator('.map-symbol-accepted')).toHaveCount(1)
+  await noOverflow(page)
+  await map.screenshot({ path: `.artifacts/map-symbols-${info.project.name}.png` })
+})
+
+test('map keeps an honest stop guide when road routing fails and no bus GPS exists', async ({
+  page,
+}) => {
+  const records = await mockAccount(page, 'employee')
+  records.pickup_points.push({
+    ...records.pickup_points[0],
+    id: '00000000-0000-4000-8000-000000000041',
+    name: 'TEST destination',
+    latitude: 13.23,
+    longitude: 120.6,
+    stop_order: 2,
+  })
+  await page.route('https://router.project-osrm.org/**', (route) =>
+    route.fulfill({ status: 503, body: 'unavailable' }),
+  )
+  await page.goto('/employee')
+  const map = page.getByRole('region', { name: 'Bus locations and pickup points' })
+  await expect(map.getByRole('button', { name: 'Find bus', exact: true })).toBeDisabled()
+  await expect(map.getByText('TEST 001: active trip, no reported GPS position yet.')).toBeVisible()
+  await map.getByRole('button', { name: 'Trace road route' }).click()
+  await expect(map.getByRole('alert')).toContainText('Road routing is unavailable')
+  await expect(map.locator('path.leaflet-interactive[stroke-dasharray="9 9"]')).toHaveCount(1)
+})

@@ -4,12 +4,13 @@ import { BrowserRouter } from 'react-router-dom'
 import { App } from './App'
 import { AuthProvider } from './features/auth/AuthProvider'
 import { DataProvider } from './hooks/useData'
+import { basePath } from './lib/urls'
 import './styles/index.css'
 import 'leaflet/dist/leaflet.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={basePath() || '/'}>
       <AuthProvider>
         <DataProvider>
           <App />

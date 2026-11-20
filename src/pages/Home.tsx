@@ -51,7 +51,7 @@ export function ConnectionNotice() {
   )
 }
 export function Home() {
-  const { feed, loading, demo, lastSync } = useData()
+  const { feed, loading, demo, lastSync, waitingRequests } = useData()
   const [selected, setSelected] = useState<string>()
   const [search, setSearch] = useState('')
   const [routeId, setRouteId] = useState('')
@@ -164,6 +164,8 @@ export function Home() {
                 </span>
               </div>
               <BusMap
+                waitingRequests={waitingRequests}
+                selectedRoute={routeId || undefined}
                 feed={
                   routeId
                     ? {
@@ -181,11 +183,7 @@ export function Home() {
                 demo={demo}
               />
               <div className="map-card-footer">
-                <span>
-                  <i className="legend-dot" />
-                  Bus location <i className="legend-stop" />
-                  Pickup point
-                </span>
+                <span>Locations reported by assigned employees</span>
                 <Link to="/map">
                   Open full map <ChevronRight size={15} />
                 </Link>

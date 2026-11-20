@@ -55,6 +55,10 @@ export interface PickupRequest {
   requested_at: string
   responded_at?: string
 }
+export type MapRequest = Pick<
+  PickupRequest,
+  'id' | 'trip_id' | 'pickup_point_id' | 'status' | 'requested_at'
+>
 export interface PublicFeed {
   buses: Bus[]
   routes: Route[]

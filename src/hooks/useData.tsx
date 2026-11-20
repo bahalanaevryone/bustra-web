@@ -5,8 +5,11 @@ import { rpc, supabase } from '../lib/supabase/client'
 import { demoFeed } from '../lib/demo'
 import { useAuth } from '../features/auth/AuthProvider'
 import type { PublicFeed } from '../types'
+import type { MapRequest } from '../types'
+import { useMapRequests } from './useMapRequests'
 
 interface DataState {
+  waitingRequests: MapRequest[]
   feed: PublicFeed
   loading: boolean
   error: string
@@ -23,6 +26,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [lastSync, setLastSync] = useState<string | null>(null)
+  const waitingRequests = useMapRequests(!demo)
   const refresh = useCallback(async () => {
     if (demo) {
       setFeed(demoFeed())
@@ -92,7 +96,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   }, [demo, user?.id])
   return (
-    <DataContext.Provider value={{ feed, loading, error, demo, setDemo, refresh, lastSync }}>
+    <DataContext.Provider
+      value={{ feed, loading, error, demo, setDemo, refresh, lastSync, waitingRequests }}
+    >
       {children}
     </DataContext.Provider>
   )

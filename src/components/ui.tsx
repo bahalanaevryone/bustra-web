@@ -2,6 +2,7 @@ import { BusFront, MapPin, X, LoaderCircle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { assetUrl } from '../lib/urls'
 
 export function Brand({ light = false }: { light?: boolean }) {
   const [logoLoaded, setLogoLoaded] = useState(false)
@@ -9,7 +10,7 @@ export function Brand({ light = false }: { light?: boolean }) {
     <Link to="/" className={`brand ${light ? 'brand-light' : ''}`} aria-label="BUSTRA home">
       <span className={`brand-icon${logoLoaded ? ' brand-icon-image' : ''}`}>
         <img
-          src="/bustra-logo.png"
+          src={assetUrl('bustra-logo.png')}
           alt=""
           hidden={!logoLoaded}
           onLoad={() => {
@@ -17,7 +18,7 @@ export function Brand({ light = false }: { light?: boolean }) {
             const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
             if (favicon) {
               favicon.type = 'image/png'
-              favicon.href = '/bustra-logo.png'
+              favicon.href = assetUrl('bustra-logo.png')
             }
           }}
           onError={() => setLogoLoaded(false)}

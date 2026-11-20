@@ -148,6 +148,10 @@ export function EntityEditor({
             {field('route_name', 'Route name')}
             {field('origin', 'Origin')}
             {field('destination', 'Destination')}
+            <p className="form-help">
+              To draw this route on the map, add at least two active pickup points. The lowest
+              stop-order number is the origin and the highest is the destination.
+            </p>
           </>
         )}
         {entity === 'pickup_points' && (
@@ -164,6 +168,11 @@ export function EntityEditor({
               {field('longitude', 'Longitude', 'number')}
             </div>
             {field('stop_order', 'Stop order', 'number')}
+            <p className="form-help">
+              Use a different order number for each stop on this route: 1 for the origin, 2 for the
+              next stop, and the largest number for the destination. Enter verified coordinates for
+              the actual stop.
+            </p>
             <label className="checkbox-field">
               <input
                 name="is_active"

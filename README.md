@@ -44,7 +44,7 @@ node --env-file=.env.local scripts/check-connection.mjs
 
 Both endpoints should return OK. A 404 for `public_feed` means the migration is missing or the API schema cache has not refreshed. The check is read-only and prints no keys.
 
-During implementation, the supplied project's Auth settings returned **200**, while `public_feed` returned **404**. Hosted database changes have **not** been applied. The connected Supabase management tool did not have access to the supplied project.
+The project owner has applied the migration and development seed in hosted Supabase, created the admin and employee accounts, and confirmed a new signup after configuring Brevo SMTP. The connected Supabase management tool still lacks access to this project; use the trusted dashboard for Auth URL configuration and database administration. Do not rerun the initial migration over the existing tables.
 
 ## Create the single admin and employee test accounts
 
@@ -63,6 +63,21 @@ The default app requests **real** public data and shows an honest empty/error st
 The optional [`supabase/seed.sql`](supabase/seed.sql) inserts explicitly labelled development buses, routes, illustrative pickup points, and one unassigned future schedule if an admin exists. Run it manually only in a development project. It creates no credentials, assigned drivers, active trips, or GPS positions. Real stops and routes must be supplied by an authorised operator, with verified coordinates.
 
 To test a real local journey, create a bus and route, add stops, create a scheduled trip with an employee, then sign in as that employee and edit the schedule to `active`. Select the trip and press **Start sharing location** on a GPS-enabled device. Use a trusted HTTPS development host for mobile GPS; loopback URLs on a phone point to the phone, not your computer.
+
+## Map routes and symbols
+
+Add at least two **active pickup points** to each route using **Admin → Pickup points**. Give them distinct stop-order values: the first point is the origin, intermediate points are stops, and the last point is the destination. Verify their latitude/longitude with the operator. A route name or a departure schedule alone cannot provide map coordinates.
+
+The map initially draws a **dashed stop-to-stop guide**. Press **Trace road route** to request an estimated driving route through those configured stops. A solid line follows the routing result; it is not a record of the bus's movement or a certified bus-accessible itinerary. Failed routing leaves the guide visible. Ambiguous ordering or fewer than two active points produces an explanation rather than an invented route.
+
+- **Blue bus + plate label:** last GPS position reported by the assigned employee. It turns grey after 90 seconds without an update. **Find bus** centres on the selected bus, or the first displayed bus if none is selected.
+- **Orange person + count:** pending pickup requests at a designated stop. **Teal person:** accepted requests; this does not confirm boarding. Guests see stops but no private request counts. Passengers see their own requests; staff and admin see only rows allowed by database RLS. The marker is the selected stop, not a passenger's live device location.
+- **Green A / red B / flag:** route origin, destination, and intermediate pickup stops.
+- **Purple person + accuracy circle:** the viewer's device location from **Locate me**, kept in that browser. Employee **Start sharing location** is the separate action that publishes the bus position.
+
+For Android testing, open the HTTPS site in Chrome, enable Android Location and precise location for Chrome, allow the site's location permission, and keep the employee page active. Laptop location may be very approximate. Chrome DevTools Sensors overrides simulate a location; remove overrides for real GPS. The app rejects bus reports with accuracy worse than 100 metres. The database stores only the latest bus position, so no historical journey trail is shown.
+
+Road routing defaults to the public [OSRM demo service](https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server) for light testing. Requests are explicit, cached per browser tab, and queued at less than one per second per tab. Only public configured stops are sent, never passenger/device positions. Public demo capacity is shared and has no availability guarantee; set `VITE_ROUTING_URL` to your own compatible OSRM endpoint for wider use. Driving results require operator review for bus restrictions.
 
 ## Verification
 
@@ -89,7 +104,15 @@ Passenger changes are atomic ±1 operations with a row lock and database capacit
 
 ## Deployment
 
-This checkout is prepared for local review; no GitHub push or hosted deployment has been performed. Build with the two public environment variables set, then publish `dist/` to a static host supporting **SPA fallback to `index.html`**. Configure your host to serve all app paths (for example `/map` and `/login`) through the SPA. `public/_redirects` is included for compatible hosts. Add the deployed URL to Supabase Auth redirects. Use HTTPS for GPS. Never deploy a private environment file.
+Source is pushed to [bahalanaevryone/bustra-web](https://github.com/bahalanaevryone/bustra-web). GitHub Pages is configured for [the BUSTRA test site](https://bahalanaevryone.github.io/bustra-web/), with automatic deployment from `main` using [the workflow](.github/workflows/deploy-pages.yml). Check the repository's **Actions** tab for each deployment result before sharing a new build. The two public Supabase values are repository Actions variables; no private environment file is committed or uploaded. The workflow runs type, unit, database-integrity and build checks before publishing.
+
+Before email signup/reset testing on the hosted site, open **Supabase → Authentication → URL Configuration** and save:
+
+- **Site URL:** `https://bahalanaevryone.github.io/bustra-web/`
+- **Redirect URLs:** `https://bahalanaevryone.github.io/bustra-web/login` and `https://bahalanaevryone.github.io/bustra-web/update-password`
+- Keep the local development redirects if you still use the laptop.
+
+The build uses `VITE_BASE_PATH=/bustra-web/`; Router links, logos, asset paths and Auth redirects include that prefix. GitHub Pages serves the application through a generated `404.html` for direct deep links; those navigation responses retain HTTP 404 although the app loads. For a host with full SPA rewriting, publish `dist/` with the appropriate `VITE_BASE_PATH` (normally `/`) and route all app paths to `index.html`. `public/_redirects` is included for compatible hosts. Use HTTPS for phone GPS.
 
 OpenStreetMap community tiles are used for light development with visible attribution. Before production, review the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/) and configure `VITE_MAP_TILE_URL` and `VITE_MAP_ATTRIBUTION` for an appropriate tile provider. No prefetching, offline tile packs, or scraping is implemented. The default map viewport is approximate Mamburao; viewport configuration is never treated as a bus position.
 

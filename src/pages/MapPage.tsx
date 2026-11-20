@@ -8,7 +8,7 @@ import { Empty, Status } from '../components/ui'
 import { ConnectionNotice } from './Home'
 import { locationAge } from '../lib/utils'
 export function MapPage() {
-  const { feed, demo } = useData()
+  const { feed, demo, waitingRequests } = useData()
   const [params, setParams] = useSearchParams()
   const selected = params.get('trip') || undefined
   const [route, setRoute] = useState('')
@@ -90,6 +90,8 @@ export function MapPage() {
           </p>
         </aside>
         <BusMap
+          waitingRequests={waitingRequests}
+          selectedRoute={route || undefined}
           feed={{
             ...feed,
             trips,

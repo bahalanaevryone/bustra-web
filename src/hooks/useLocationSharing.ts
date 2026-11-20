@@ -7,6 +7,12 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
   const [status, setStatus] = useState('Location sharing is off.')
   const [lastUpdate, setLastUpdate] = useState<string>()
   const generation = useRef(0)
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    if (!sharing) return
+    const timer = setInterval(() => setNow(Date.now()), 15000)
+    return () => clearInterval(timer)
+  }, [sharing])
   const stop = useCallback(() => {
     generation.current++
     if (watch.current !== null) navigator.geolocation.clearWatch(watch.current)
@@ -16,6 +22,7 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
   }, [])
   useEffect(() => {
     stop()
+    setLastUpdate(undefined)
     return stop
   }, [tripId, allowed, stop])
   useEffect(() => {
@@ -46,13 +53,18 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
     let writing = false
     let lastCoords: [number, number] | null = null
     setSharing(true)
+    setLastUpdate(undefined)
     setStatus('Waiting for GPS permission and a position…')
     watch.current = navigator.geolocation.watchPosition(
       async (position) => {
         if (currentGeneration !== generation.current) return
         const { latitude, longitude, accuracy, speed } = position.coords
         if (accuracy > 100) {
-          setStatus(`GPS accuracy is ±${Math.round(accuracy)} m. Waiting for a clearer signal.`)
+          const range =
+            accuracy >= 1000 ? `${(accuracy / 1000).toFixed(1)} km` : `${Math.round(accuracy)} m`
+          setStatus(
+            `Device location is too approximate (±${range}). Bus location has not been updated. Enable precise location on a GPS-enabled phone; waiting for accuracy within 100 m.`,
+          )
           return
         }
         const elapsed = Date.now() - lastWrite
@@ -103,5 +115,9 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
     )
   }
-  return { sharing, status, lastUpdate, start, stop }
+  const displayStatus =
+    sharing && lastUpdate && now - Date.parse(lastUpdate) > 90000
+      ? 'Last bus location is outdated. Waiting for a fresh device position; keep this page active with precise location enabled.'
+      : status
+  return { sharing, status: displayStatus, lastUpdate, start, stop }
 }

@@ -6,6 +6,7 @@ import { requireClient } from '../lib/supabase/client'
 import { errorMessage, registrationSchema, safeReturn } from '../lib/utils'
 import { useAuth } from '../features/auth/AuthProvider'
 import { BusIllustration } from '../components/BusIllustration'
+import { appUrl } from '../lib/urls'
 export function AuthPage({ mode }: { mode: 'login' | 'register' | 'reset' | 'update-password' }) {
   const register = mode === 'register'
   const reset = mode === 'reset'
@@ -49,7 +50,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'reset' | 'upd
           password,
           options: {
             data: { first_name, last_name },
-            emailRedirectTo: `${window.location.origin}/login`,
+            emailRedirectTo: appUrl('/login'),
           },
         })
         if (error) throw error
@@ -60,7 +61,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'reset' | 'upd
         )
       } else if (reset) {
         const { error } = await client.auth.resetPasswordForEmail(values.email, {
-          redirectTo: `${window.location.origin}/update-password`,
+          redirectTo: appUrl('/update-password'),
         })
         if (error) throw error
         setMessage(

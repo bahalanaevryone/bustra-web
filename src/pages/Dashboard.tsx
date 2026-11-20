@@ -262,6 +262,7 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
                     </span>
                   </div>
                   <BusMap
+                    waitingRequests={data.pickup_requests}
                     feed={
                       demo
                         ? {
