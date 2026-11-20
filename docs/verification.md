@@ -1,5 +1,9 @@
 # Verification record
 
+The live-map lifecycle fix filters the shared map to active trips, their routes and their locations. Completed/cancelled, future scheduled and delayed-only routes are excluded; an active trip remains visible regardless of its departure date. Historical records are preserved. Four new unit cases cover inactive routes, old-but-active trips, shared-route lifecycles and preview/history preservation. Six desktop/mobile browser scenarios passed for dormant catalog filtering, selected-trip completion with another active bus, last-trip removal, stale GPS/request pins and employee completion with retained schedule history. No database changes are needed for this map fix.
+
+For this fix, `npm run check` passed with 26 unit tests, 77 PostgreSQL checks and the production build. The wider 62-case browser run had 58 passes and four loading/action timeouts. The affected scenarios were rerun on desktop/mobile with one worker; all eight rechecks passed. These results should not be represented as a clean first-pass 62-case run.
+
 The latest multi-admin role management and passenger-pin updates supersede historical single-admin and stop-only rules described below. See [role management](role-management.md) for the current role operations and audit safeguards. See [Dynamic pickups](dynamic-pickups.md) for the current schema, test process and limitations.
 
 Verified on 20 November 2026 using Node 24, Chrome, and embedded PostgreSQL. Source was pushed to GitHub and Pages hosting configured. The automatic-route upgrade was applied directly to the authorized hosted project using the Supabase CLI. The project owner applied the hosted migration and seed, created accounts, and reported successful signup after fixing SMTP. Automated database mutation tests use local PGlite; browser mutations use intercepted fixtures, not the hosted database.

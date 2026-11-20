@@ -986,3 +986,159 @@ test('a stale user editor cannot overwrite a role changed by another admin', asy
   await expect(dialog.getByRole('alert')).toContainText('role changed since you opened it')
   expect(records.profiles[1].role).toBe('user')
 })
+
+test('live maps hide dormant route history and keep an old departure that is still active', async ({
+  page,
+}) => {
+  const records = await mockAccount(page, 'user')
+  records.trips[0].departure_at = '2000-01-01T00:00:00Z'
+  records.locations.push({
+    trip_id: tripId,
+    latitude: 13.225,
+    longitude: 120.595,
+    updated_at: new Date().toISOString(),
+  })
+  let roadRequests = 0
+  await page.route('https://router.project-osrm.org/**', (route) => {
+    roadRequests++
+    return route.fulfill({ status: 503 })
+  })
+  for (const status of ['completed', 'cancelled', 'scheduled', 'delayed']) {
+    const route = `route-${status}`,
+      trip = `trip-${status}`
+    records.routes.push({
+      ...records.routes[0],
+      id: route,
+      route_name: `${status} route`,
+      origin: `${status} origin`,
+      destination: `${status} destination`,
+      is_approved: false,
+      road_path: null,
+    })
+    records.trips.push({ ...records.trips[0], id: trip, route_id: route, status })
+    records.locations.push({
+      trip_id: trip,
+      latitude: 13.22,
+      longitude: 120.59,
+      updated_at: new Date().toISOString(),
+    })
+  }
+  await page.goto('/map')
+  let map = page.getByRole('region', { name: 'Bus locations and pickup points' })
+  await expect(page.locator('.map-bus-card')).toHaveCount(1)
+  await expect(map.locator('.bus-plate-label')).toHaveText('TEST 001')
+  await expect(map.locator('.map-symbol-origin')).toHaveCount(1)
+  await expect(map.locator('.map-symbol-destination')).toHaveCount(1)
+  await expect(map.locator('path.leaflet-interactive')).toHaveCount(1)
+  await expect(
+    page.getByRole('combobox', { name: 'Route', exact: true }).locator('option'),
+  ).toHaveCount(2)
+  await expect(map.locator('.map-route-summary')).toContainText('Test origin')
+  expect(roadRequests).toBe(0)
+  await page.goto('/')
+  map = page.getByRole('region', { name: 'Bus locations and pickup points' })
+  await expect(map.locator('.map-symbol-origin')).toHaveCount(1)
+  await expect(map.locator('path.leaflet-interactive')).toHaveCount(1)
+  await expect(
+    page.getByRole('combobox', { name: 'Filter home map and buses by route' }).locator('option'),
+  ).toHaveCount(2)
+  expect(roadRequests).toBe(0)
+  await noOverflow(page)
+})
+
+test('ending the selected bus clears its map details and route filter while other active buses remain', async ({
+  page,
+}) => {
+  const records = await mockAccount(page, 'user')
+  const secondRoute = '00000000-0000-4000-8000-000000000022'
+  const secondTrip = '00000000-0000-4000-8000-000000000032'
+  const secondBus = '00000000-0000-4000-8000-000000000012'
+  records.buses.push({ id: secondBus, plate_number: 'TEST 002', capacity: 40 })
+  records.routes.push({
+    ...records.routes[0],
+    id: secondRoute,
+    route_name: 'Second route',
+    origin: 'Second origin',
+    destination: 'Second destination',
+    origin_lat: 13.25,
+    origin_lng: 120.61,
+    destination_lat: 13.26,
+    destination_lng: 120.62,
+    road_path: [
+      [13.25, 120.61],
+      [13.26, 120.62],
+    ],
+  })
+  records.trips.push({
+    ...records.trips[0],
+    id: secondTrip,
+    bus_id: secondBus,
+    route_id: secondRoute,
+    driver_id: '00000000-0000-4000-8000-000000000003',
+    departure_at: '2000-01-01T00:00:00Z',
+  })
+  records.locations.push(
+    { trip_id: tripId, latitude: 13.225, longitude: 120.595, updated_at: new Date().toISOString() },
+    {
+      trip_id: secondTrip,
+      latitude: 13.255,
+      longitude: 120.615,
+      updated_at: new Date().toISOString(),
+    },
+  )
+  await page.clock.install()
+  await page.goto('/map')
+  const routeFilter = page.getByRole('combobox', { name: 'Route', exact: true })
+  await routeFilter.selectOption(routeId)
+  await page.locator('.map-bus-card').click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  records.trips[0].status = 'completed'
+  records.pickup_requests[0].status = 'expired'
+  await page.clock.runFor(15050)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page).toHaveURL(/\/map$/)
+  await expect(routeFilter).toHaveValue('')
+  const map = page.getByRole('region', { name: 'Bus locations and pickup points' })
+  await expect(map.locator('.bus-plate-label')).toHaveText('TEST 002')
+  await expect(map.locator('.map-symbol-origin')).toHaveCount(1)
+  await expect(map.locator('path.leaflet-interactive')).toHaveCount(1)
+  await expect(map.locator('.map-route-summary')).toContainText('Second origin')
+  await expect(map.locator('.map-symbol-waiting')).toHaveCount(0)
+  records.trips[1].status = 'completed'
+  await page.clock.runFor(15050)
+  await expect(map.locator('.bus-plate-label')).toHaveCount(0)
+  await expect(map.locator('.map-symbol-origin')).toHaveCount(0)
+  await expect(map.locator('.map-symbol-destination')).toHaveCount(0)
+  await expect(map.locator('path.leaflet-interactive')).toHaveCount(0)
+  await expect(map.getByRole('button', { name: 'Trace road route', exact: true })).toHaveCount(0)
+  await expect(map.locator('.map-route-summary')).toContainText('0 active routes')
+  await expect(routeFilter.locator('option')).toHaveCount(1)
+  expect(records.routes).toHaveLength(2)
+  await noOverflow(page)
+})
+
+test('completing an employee trip removes its route and GPS from the live map while retaining schedule history', async ({
+  page,
+}) => {
+  const records = await mockAccount(page, 'employee')
+  records.locations.push({
+    trip_id: tripId,
+    latitude: 13.225,
+    longitude: 120.595,
+    updated_at: new Date().toISOString(),
+  })
+  await page.goto('/employee')
+  const map = page.getByRole('region', { name: 'Bus locations and pickup points' })
+  await expect(map.locator('.map-symbol-origin')).toHaveCount(1)
+  await expect(map.locator('.bus-plate-label')).toHaveCount(1)
+  await page.getByRole('button', { name: `Complete trip ${tripId}`, exact: true }).click()
+  await expect(page.getByText('Trip status updated.', { exact: true })).toBeVisible()
+  await expect(map.locator('.map-symbol-origin')).toHaveCount(0)
+  await expect(map.locator('.map-symbol-destination')).toHaveCount(0)
+  await expect(map.locator('.bus-plate-label')).toHaveCount(0)
+  await expect(map.locator('path.leaflet-interactive')).toHaveCount(0)
+  await expect(map.locator('.map-symbol-waiting')).toHaveCount(0)
+  await expect(page.locator('.management-card tbody')).toContainText('Completed')
+  expect(records.routes).toHaveLength(1)
+  expect(records.trips).toHaveLength(1)
+})

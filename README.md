@@ -76,6 +76,8 @@ See [the complete component, API configuration and testing guide](docs/dynamic-l
 
 ## Map routes and symbols
 
+Live maps display only trips whose status is `active`, including an active trip with an older departure date. Completed/cancelled trips, stale GPS rows and routes without an active trip are excluded from map lines, endpoint pins and map route filters. A shared route stays visible while another trip on it is active. Schedule history and route/schedule editor previews remain available separately. Trip status changes refresh through the existing Realtime/15-second fallback; finishing a selected trip also clears its public map dialog and expired filter.
+
 Passengers select a one-time pickup position through GPS or the map; no stop catalog is required. Only the owner and assigned employee may read the coordinates. Driver review is required for safe and permitted stopping; proximity to a road path never guarantees boarding.
 
 The map draws saved **green operator-reviewed road paths**, **blue suggested driving paths** when routing is configured, and **dashed endpoint guides** when geometry is unavailable. Endpoint guides are not road geometry. Pickup proximity uses stored actual geometry only; without it, requests are explicitly unverified.

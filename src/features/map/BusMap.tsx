@@ -26,6 +26,7 @@ import { escapeHtml, farFromRoute, getRouteGuides, validCoordinate } from './rou
 import type { Coordinate } from './routeGeometry'
 import { requestRoadRoute, routingConfigured } from './roadRouting'
 import type { RoadRoute } from './roadRouting'
+import { liveMapFeed } from './liveMap'
 
 const center: Coordinate = [
   Number(import.meta.env.VITE_MAP_LAT || 13.2233),
@@ -114,7 +115,7 @@ function FitButton({ points }: { points: Coordinate[] }) {
 }
 
 export function BusMap({
-  feed,
+  feed: sourceFeed,
   selected,
   onSelect,
   demo = false,
@@ -132,6 +133,7 @@ export function BusMap({
   selectedRoute?: string
   focusedPickup?: MapRequest
 }) {
+  const feed = useMemo(() => liveMapFeed(sourceFeed), [sourceFeed])
   const [position, setPosition] = useState<Coordinate | null>(null)
   const [positionAccuracy, setPositionAccuracy] = useState(0)
   const [error, setError] = useState('')
@@ -162,7 +164,10 @@ export function BusMap({
   const initialPoints = points.length
     ? points
     : locations.map((l) => [Number(l.latitude), Number(l.longitude)] as Coordinate)
-  const selectionKey = selectedRoute || selected || ''
+  const selectionKey = `${selectedRoute || selected || 'all'}:${activeTrips
+    .map((trip) => trip.id)
+    .sort()
+    .join(',')}`
   const completePoints = [
     ...points,
     ...locations.map((l) => [Number(l.latitude), Number(l.longitude)] as Coordinate),
@@ -256,7 +261,11 @@ export function BusMap({
           />
           <MapView
             position={position}
-            pickup={focusedPickup}
+            pickup={
+              focusedPickup && activeTrips.some((trip) => trip.id === focusedPickup.trip_id)
+                ? focusedPickup
+                : undefined
+            }
             initialPoints={initialPoints}
             selectionPoints={initialPoints}
             selectionKey={selectionKey}
@@ -422,7 +431,7 @@ export function BusMap({
         </MapContainer>
         <div className="map-top-label">
           <MapPin size={14} />
-          {demo ? 'Illustrative demo positions' : 'Configured routes & reported locations'}
+          {demo ? 'Illustrative demo positions' : 'Active trips & reported locations'}
         </div>
         <div className="map-bottom-actions">
           <button
@@ -480,7 +489,7 @@ export function BusMap({
             </span>
           ) : (
             <span>
-              {guides.length} configured route{guides.length === 1 ? '' : 's'}
+              {guides.length} active route{guides.length === 1 ? '' : 's'}
             </span>
           )}
           {hasLine && routingConfigured() && guides.some((g) => !g.approved) && (
@@ -507,7 +516,9 @@ export function BusMap({
             ? 'Blue line: suggested driving path, not approved for bus service. Routing: OSRM / OpenStreetMap.'
             : hasLine
               ? 'Dashed line: endpoint guide, not a road route.'
-              : 'A route guide needs confirmed endpoints.'}
+              : guides.length
+                ? 'A route guide needs confirmed endpoints.'
+                : 'No active trips. Routes appear here when a trip starts.'}
           {!routingConfigured() &&
             !guides.every((g) => g.approved) &&
             ' Road routing is not configured.'}
@@ -531,7 +542,7 @@ export function BusMap({
             : active trip, no reported GPS position yet.
           </p>
         )}
-        {routingError && (
+        {routingError && guides.length > 0 && (
           <p className="map-route-warning" role="alert">
             {routingError}
           </p>

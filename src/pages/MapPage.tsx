@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { BusFront, Search, MapPin } from 'lucide-react'
 import { BusMap } from '../features/map/BusMap'
@@ -7,12 +7,32 @@ import { BusDetails } from '../features/buses/BusDetails'
 import { Empty, Status } from '../components/ui'
 import { ConnectionNotice } from './Home'
 import { locationAge } from '../lib/utils'
+import { liveMapFeed } from '../features/map/liveMap'
 export function MapPage() {
-  const { feed, demo, waitingRequests } = useData()
+  const { feed: sourceFeed, loading, error, demo, waitingRequests } = useData()
+  const feed = liveMapFeed(sourceFeed)
   const [params, setParams] = useSearchParams()
   const selected = params.get('trip') || undefined
-  const [route, setRoute] = useState('')
+  const [routeFilter, setRoute] = useState('')
+  const route = feed.routes.some((r) => r.id === routeFilter) ? routeFilter : ''
   const [query, setQuery] = useState('')
+  const selectedActive = feed.trips.some((trip) => trip.id === selected)
+  useEffect(() => {
+    if (!loading && !error && routeFilter && !route) setRoute('')
+  }, [loading, error, routeFilter, route])
+  useEffect(() => {
+    if (!loading && !error && selected && !selectedActive) {
+      setParams(
+        (previous) => {
+          const next = new URLSearchParams(previous)
+          next.delete('trip')
+          next.delete('pickup')
+          return next
+        },
+        { replace: true },
+      )
+    }
+  }, [loading, error, selected, selectedActive, setParams])
   const trips = feed.trips.filter(
     (t) =>
       t.status === 'active' &&
@@ -103,7 +123,7 @@ export function MapPage() {
           large
         />
       </div>
-      {selected && (
+      {selected && selectedActive && (
         <BusDetails
           key={selected}
           tripId={selected}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   BusFront,
@@ -19,6 +19,7 @@ import { BusDetails } from '../features/buses/BusDetails'
 import { BusIllustration } from '../components/BusIllustration'
 import { Empty, Loading, Notice, Status } from '../components/ui'
 import { date, isFresh, time } from '../lib/utils'
+import { liveMapFeed } from '../features/map/liveMap'
 
 export function ConnectionNotice() {
   const { error, demo, setDemo, refresh } = useData()
@@ -51,11 +52,20 @@ export function ConnectionNotice() {
   )
 }
 export function Home() {
-  const { feed, loading, demo, lastSync, waitingRequests } = useData()
+  const { feed, loading, error, demo, lastSync, waitingRequests } = useData()
   const [selected, setSelected] = useState<string>()
   const [search, setSearch] = useState('')
-  const [routeId, setRouteId] = useState('')
-  const active = feed.trips.filter((t) => t.status === 'active')
+  const [routeFilter, setRouteId] = useState('')
+  const liveFeed = liveMapFeed(feed)
+  const routeId = liveFeed.routes.some((route) => route.id === routeFilter) ? routeFilter : ''
+  const active = liveFeed.trips
+  const selectedAvailable = feed.trips.some(
+    (trip) => trip.id === selected && !['completed', 'cancelled'].includes(trip.status),
+  )
+  useEffect(() => {
+    if (!loading && !error && routeFilter && !routeId) setRouteId('')
+    if (!loading && !error && selected && !selectedAvailable) setSelected(undefined)
+  }, [loading, error, routeFilter, routeId, selected, selectedAvailable])
   const filtered = active.filter(
     (t) =>
       (!routeId || t.route_id === routeId) &&
@@ -160,7 +170,7 @@ export function Home() {
                 <span className="subtle-pill">
                   {demo
                     ? 'Demo view'
-                    : `${feed.locations.filter((l) => isFresh(l.updated_at)).length} sharing now`}
+                    : `${liveFeed.locations.filter((l) => isFresh(l.updated_at)).length} sharing now`}
                 </span>
               </div>
               <BusMap
@@ -169,13 +179,13 @@ export function Home() {
                 feed={
                   routeId
                     ? {
-                        ...feed,
-                        trips: feed.trips.filter((t) => t.route_id === routeId),
-                        locations: feed.locations.filter((l) =>
-                          feed.trips.some((t) => t.id === l.trip_id && t.route_id === routeId),
+                        ...liveFeed,
+                        trips: liveFeed.trips.filter((t) => t.route_id === routeId),
+                        locations: liveFeed.locations.filter((l) =>
+                          liveFeed.trips.some((t) => t.id === l.trip_id && t.route_id === routeId),
                         ),
                       }
-                    : feed
+                    : liveFeed
                 }
                 selected={selected}
                 onSelect={setSelected}
@@ -291,7 +301,7 @@ export function Home() {
                 aria-label="Filter home map and buses by route"
               >
                 <option value="">All routes</option>
-                {feed.routes.map((r) => (
+                {liveFeed.routes.map((r) => (
                   <option value={r.id} key={r.id}>
                     {r.route_name}
                   </option>
