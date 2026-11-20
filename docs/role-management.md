@@ -54,3 +54,11 @@ The first Admin remains a developer responsibility: register and verify the acco
 8. Verify ordinary Users/Employees cannot open User Management or execute role/audit operations directly. New signup must still default to User even if submitted metadata claims Admin.
 
 Run `npm.cmd run check` and `npm.cmd run test:e2e`. Database checks exercise actual PostgreSQL grants, RLS, triggers, role operations, confirmation, atomic saves, stale edits, inactive admins, bulk removal and audit retention. Browser tests cover all roles, confirmation cancellation, audit display, last-admin errors, self-demotion, permission refresh and stale edits at desktop/mobile widths. Browser/backend fixtures do not replace real two-device Realtime checks or a concurrent multi-connection load test.
+
+## Function missing from schema cache
+
+If User Management reports `PGRST202` / `Could not find the function public.admin_update_user(...) in the schema cache`, first confirm that the role migration is applied to the exact Supabase project used by the app. The required signature is `public.admin_update_user(uuid,text,text,text,boolean,text)` with named arguments `p_user`, `p_first_name`, `p_last_name`, `p_role`, `p_confirm_admin`, `p_expected_role`.
+
+When the function already exists with the correct grants, run `notify pgrst, 'reload schema';` through trusted SQL access, then retry the editor. A browser refresh alone does not reload the server schema cache. Do not grant this function to guests or bypass the guarded operation.
+
+Run `node --env-file=.env.local scripts/check-connection.mjs` to verify the actual REST API, including these exact role arguments and the audit RPC. The probes use only the publishable key and no account session: successful signature resolution returns an expected permission denial, and a missing-function response fails the check. They do not change any account. The Pages workflow now runs this live API check before publishing, in addition to local PostgreSQL tests and mocked browser coverage. See [PostgREST schema cache reload](https://docs.postgrest.org/en/stable/references/schema_cache.html).
