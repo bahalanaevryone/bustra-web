@@ -4,6 +4,9 @@ import type { Operations } from '../../hooks/useOperations'
 import { Modal, Notice } from '../../components/ui'
 import { rpc } from '../../lib/supabase/client'
 import { errorMessage } from '../../lib/utils'
+import { generatedRouteName, placeKey, registeredPlaces } from '../schedules/scheduleRoutes'
+import { RouteReview } from './RouteReview'
+import type { Coordinate } from '../map/routeGeometry'
 export const entityNames: Record<Entity, string> = {
   profiles: 'user',
   buses: 'bus',
@@ -27,6 +30,16 @@ export function EntityEditor({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const existingRoute = data.routes.find((r) => r.id === record?.route_id)
+  const [origin, setOrigin] = useState(existingRoute?.origin || '')
+  const [destination, setDestination] = useState(existingRoute?.destination || '')
+  const [busId, setBusId] = useState(String(record?.bus_id || ''))
+  const [roadPath, setRoadPath] = useState<Coordinate[] | null>(
+    data.routes.find((r) => r.id === record?.id)?.road_path || null,
+  )
+  const places = registeredPlaces(data.routes, data.pickup_points)
+  const selectedBus = data.buses.find((b) => b.id === busId)
+  const assignmentLocked = record?.status === 'active'
   function field(
     name: string,
     label: string,
@@ -52,10 +65,10 @@ export function EntityEditor({
           <select
             name={name}
             defaultValue={String(value)}
-            required={name !== 'driver_id'}
+            required
             disabled={locked || (name === 'role' && record?.role === 'admin')}
           >
-            <option value="">{name === 'driver_id' ? 'Unassigned' : 'Choose…'}</option>
+            <option value="">Choose…</option>
             {options.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
@@ -114,9 +127,17 @@ export function EntityEditor({
           for (const key of ['bus_id', 'route_id', 'driver_id', 'departure_at'])
             values[key] = record[key]
         } else values.departure_at = new Date(String(values.departure_at)).toISOString()
+        values.origin = origin
+        values.destination = destination
+        values.status = record?.status || 'scheduled'
+        if (record) values.initial_passenger_count = record.onboard_count
         await rpc('manage_trip', { p_id: record?.id || null, p_data: values })
       } else {
         if (entity === 'pickup_points') values.is_active = values.is_active === 'on'
+        if (entity === 'routes') {
+          values.is_approved = values.is_approved === 'on'
+          values.road_path = roadPath
+        }
         await rpc('admin_save', { p_entity: entity, p_id: record?.id || null, p_data: values })
         if (entity === 'profiles' && values.role && values.role !== record?.role)
           await rpc('set_employee_role', { p_user: record?.id, p_role: values.role })
@@ -132,6 +153,15 @@ export function EntityEditor({
   return (
     <Modal title={`${record ? 'Edit' : 'Add'} ${entityNames[entity]}`} onClose={onClose}>
       <form
+        onChange={(e) => {
+          const target = e.target
+          if (
+            entity === 'routes' &&
+            target instanceof HTMLInputElement &&
+            ['origin', 'destination'].includes(target.name)
+          )
+            setRoadPath(null)
+        }}
         onSubmit={(e) => {
           e.preventDefault()
           void save(e.currentTarget)
@@ -145,13 +175,18 @@ export function EntityEditor({
         )}
         {entity === 'routes' && (
           <>
-            {field('route_name', 'Route name')}
             {field('origin', 'Origin')}
             {field('destination', 'Destination')}
             <p className="form-help">
               To draw this route on the map, add at least two active pickup points. The lowest
               stop-order number is the origin and the highest is the destination.
             </p>
+            <RouteReview
+              route={data.routes.find((r) => r.id === record?.id)}
+              points={data.pickup_points}
+              path={roadPath}
+              onPath={setRoadPath}
+            />
           </>
         )}
         {entity === 'pickup_points' && (
@@ -185,42 +220,89 @@ export function EntityEditor({
         )}
         {entity === 'trips' && (
           <>
-            {field(
-              'bus_id',
-              'Bus',
-              'text',
-              data.buses.map((b) => ({
-                value: b.id,
-                label: `${b.plate_number} · ${b.capacity} capacity`,
-              })),
-            )}
-            {field(
-              'route_id',
-              'Route',
-              'text',
-              data.routes.map((r) => ({ value: r.id, label: r.route_name })),
-            )}
+            <label className="field">
+              <span>Origin</span>
+              <select
+                name="origin"
+                value={origin}
+                disabled={assignmentLocked}
+                required
+                onChange={(e) => setOrigin(e.target.value)}
+              >
+                <option value="">Choose origin</option>
+                {places.map((p) => (
+                  <option key={p} value={p} disabled={placeKey(p) === placeKey(destination)}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Destination</span>
+              <select
+                name="destination"
+                value={destination}
+                disabled={assignmentLocked}
+                required
+                onChange={(e) => setDestination(e.target.value)}
+              >
+                <option value="">Choose destination</option>
+                {places.map((p) => (
+                  <option key={p} value={p} disabled={placeKey(p) === placeKey(origin)}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="form-help" role="status">
+              {origin && destination
+                ? `Route: ${generatedRouteName(origin, destination)} · Existing endpoint pairs are reused automatically.`
+                : 'Select registered origin and destination locations. The route name is generated automatically.'}
+            </p>
+            <label className="field">
+              <span>Assigned Bus</span>
+              <select
+                name="bus_id"
+                value={busId}
+                disabled={assignmentLocked}
+                required
+                onChange={(e) => setBusId(e.target.value)}
+              >
+                <option value="">Choose bus</option>
+                {data.buses.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.plate_number} · {b.capacity} capacity
+                  </option>
+                ))}
+              </select>
+            </label>
             {field(
               'driver_id',
-              'Assigned employee',
+              'Assigned Driver',
               'text',
               data.profiles
                 .filter((p) => p.role === 'employee')
                 .map((p) => ({ value: p.id, label: `${p.first_name} ${p.last_name}` })),
             )}
-            {field('departure_at', 'Departure (your device’s local time)', 'datetime-local')}
-            {field(
-              'status',
-              'Trip status',
-              'text',
-              ['scheduled', 'active', 'delayed', 'completed', 'cancelled'].map((v) => ({
-                value: v,
-                label: v.charAt(0).toUpperCase() + v.slice(1),
-              })),
-            )}
+            {field('departure_at', 'Departure Date and Time', 'datetime-local')}
+            <label className="field">
+              <span>Initial Passenger Count</span>
+              <input
+                name="initial_passenger_count"
+                type="number"
+                min={0}
+                max={selectedBus?.capacity}
+                step={1}
+                required
+                readOnly={!!record}
+                defaultValue={Number(record?.onboard_count || 0)}
+              />
+            </label>
             <p className="form-help">
-              An active trip’s assignment is locked. Finish or cancel it before changing its bus or
-              employee. Finished trips are retained as history.
+              Times use your device’s local time. New schedules start as Scheduled. Initial count
+              cannot exceed the bus capacity; later changes use the assigned trip passenger
+              controls. Newly generated routes require operator approval and valid pickup stops
+              before accepting requests.
             </p>
           </>
         )}

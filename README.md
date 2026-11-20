@@ -44,7 +44,7 @@ node --env-file=.env.local scripts/check-connection.mjs
 
 Both endpoints should return OK. A 404 for `public_feed` means the migration is missing or the API schema cache has not refreshed. The check is read-only and prints no keys.
 
-The project owner has applied the migration and development seed in hosted Supabase, created the admin and employee accounts, and confirmed a new signup after configuring Brevo SMTP. The connected Supabase management tool still lacks access to this project; use the trusted dashboard for Auth URL configuration and database administration. Do not rerun the initial migration over the existing tables.
+The project owner applied the initial migration and development seed, created admin/employee accounts, and confirmed signup after configuring Brevo SMTP. The automatic-route upgrade was applied using the authenticated Supabase CLI. The management connector lacks project access, but the CLI connection works. Do not rerun the initial migration over existing tables. For a fresh installation, apply every file in `supabase/migrations/` in filename order before creating schedules.
 
 ## Create the single admin and employee test accounts
 
@@ -62,13 +62,23 @@ The default app requests **real** public data and shows an honest empty/error st
 
 The optional [`supabase/seed.sql`](supabase/seed.sql) inserts explicitly labelled development buses, routes, illustrative pickup points, and one unassigned future schedule if an admin exists. Run it manually only in a development project. It creates no credentials, assigned drivers, active trips, or GPS positions. Real stops and routes must be supplied by an authorised operator, with verified coordinates.
 
-To test a real local journey, create a bus and route, add stops, create a scheduled trip with an employee, then sign in as that employee and edit the schedule to `active`. Select the trip and press **Start sharing location** on a GPS-enabled device. Use a trusted HTTPS development host for mobile GPS; loopback URLs on a phone point to the phone, not your computer.
+To test a journey, register real locations/stops through the admin workspace, then create a schedule with the six fields described below. The assigned employee uses **Start** in the schedule row and **Start sharing location** on a GPS-enabled device. Use HTTPS for mobile GPS; loopback URLs on a phone point to the phone, not your computer.
+
+## Automatic schedule routes
+
+The schedule form has exactly six inputs: **Origin**, **Destination**, **Assigned Bus**, **Assigned Driver**, **Departure Date and Time**, and **Initial Passenger Count**. Endpoints are selected from registered route endpoint names and active pickup locations. Missing locations require admin registration and verified coordinates. The form displays an automatic `Origin → Destination` name, with no manual route-name or route selector. New schedules start as Scheduled; Start/Complete/Cancel are separate actions in the schedule table. Initial counts are validated against bus capacity and can only be set at creation; active counts use the assigned employee's atomic controls.
+
+`manage_trip` resolves or creates the route and saves the trip in one transaction. Endpoint matching ignores case, surrounding whitespace and repeated internal whitespace. A unique database index plus conflict handling prevents concurrent duplicate pairs. Reversed endpoints are a different directional route. The `routes` table and `trips.route_id` foreign key remain in place; no application table was added. A failed trip insert or capacity check rolls back any newly created route. The upgrade refuses ambiguous existing duplicate endpoint pairs rather than merging/deleting records or changing references silently.
+
+New routes store registered endpoint coordinates but **do not create or copy pickup points** and start unapproved. Existing illustrative routes also require deliberate approval. In **Admin → Pickup points**, add verified stops to the generated route in distinct order. In **Admin → Routes → Edit**, choose **Preview road route**, review the candidate map with the operator, and explicitly check **Operator verified this road path and the pickup stops for bus service** before saving. The server requires at least two active, ordered stops within 100 metres of the reviewed path. Reversed stop order and invalid geometry are rejected. Changing a stop invalidates the approval, requiring another review.
+
+Passenger requests and staff acceptance both recheck the approved route, active same-route stop and proximity to the stored reviewed path in the database. A driving suggestion never enables pickup requests. Users cannot submit arbitrary coordinates or stops from another route. Legacy RPC implementations are private and cannot be invoked by browser roles to bypass these checks.
 
 ## Map routes and symbols
 
 Add at least two **active pickup points** to each route using **Admin → Pickup points**. Give them distinct stop-order values: the first point is the origin, intermediate points are stops, and the last point is the destination. Verify their latitude/longitude with the operator. A route name or a departure schedule alone cannot provide map coordinates.
 
-The map initially draws a **dashed stop-to-stop guide**. Press **Trace road route** to request an estimated driving route through those configured stops. A solid line follows the routing result; it is not a record of the bus's movement or a certified bus-accessible itinerary. Failed routing leaves the guide visible. Ambiguous ordering or fewer than two active points produces an explanation rather than an invented route.
+The map draws the saved **green operator-reviewed road path** for approved routes. For unapproved routes, it automatically requests a **blue suggested driving path** when `VITE_ROUTING_URL` is configured. This is explicitly labelled unapproved for buses; routing cannot infer transport permits or bus restrictions. Missing/failed routing leaves a **dashed endpoint/stop guide**, which is not represented as a road path. Verified endpoint coordinates can show a new route before any pickup stops are registered, without making those endpoints pickup locations. No historical GPS trail is stored.
 
 - **Blue bus + plate label:** last GPS position reported by the assigned employee. It turns grey after 90 seconds without an update. **Find bus** centres on the selected bus, or the first displayed bus if none is selected.
 - **Orange person + count:** pending pickup requests at a designated stop. **Teal person:** accepted requests; this does not confirm boarding. Guests see stops but no private request counts. Passengers see their own requests; staff and admin see only rows allowed by database RLS. The marker is the selected stop, not a passenger's live device location.
@@ -77,7 +87,7 @@ The map initially draws a **dashed stop-to-stop guide**. Press **Trace road rout
 
 For Android testing, open the HTTPS site in Chrome, enable Android Location and precise location for Chrome, allow the site's location permission, and keep the employee page active. Laptop location may be very approximate. Chrome DevTools Sensors overrides simulate a location; remove overrides for real GPS. The app rejects bus reports with accuracy worse than 100 metres. The database stores only the latest bus position, so no historical journey trail is shown.
 
-Road routing defaults to the public [OSRM demo service](https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server) for light testing. Requests are explicit, cached per browser tab, and queued at less than one per second per tab. Only public configured stops are sent, never passenger/device positions. Public demo capacity is shared and has no availability guarantee; set `VITE_ROUTING_URL` to your own compatible OSRM endpoint for wider use. Driving results require operator review for bus restrictions.
+Road routing is disabled when `VITE_ROUTING_URL` is blank. The current test deployment configures the public [OSRM demo service](https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server) for light testing. Routing is cached per browser tab and queued at less than one request per second per tab. Only registered public endpoints/stops are sent, never passenger/device positions. Public demo capacity is shared and has no availability guarantee; configure your own compatible endpoint for wider use. Stored approved geometry remains visible if routing becomes unavailable.
 
 ## Verification
 

@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { rpc } from '../../lib/supabase/client'
 import { errorMessage, isFresh, locationAge, time } from '../../lib/utils'
 import { Modal, Notice, Status } from '../../components/ui'
+import { validPickupPoints } from '../map/routeGeometry'
 
 export function BusDetails({
   tripId,
@@ -33,8 +34,12 @@ export function BusDetails({
         <p>This trip is no longer publicly available.</p>
       </Modal>
     )
-  const points = feed.pickup_points.filter((p) => p.route_id === trip.route_id && p.is_active)
+  const points = validPickupPoints(route, feed.pickup_points)
   async function request() {
+    if (!points.some((p) => p.id === point)) {
+      setError('Choose a valid pickup stop on this approved bus route.')
+      return
+    }
     if (!user) {
       navigate(`/login?returnTo=${encodeURIComponent(`/map?trip=${tripId}&point=${point}`)}`)
       return
@@ -111,6 +116,12 @@ export function BusDetails({
             </select>
           </label>
           {error && <Notice tone="error">{error}</Notice>}
+          {!route?.is_approved && (
+            <Notice tone="info">
+              This route is awaiting operator review. Pickup requests open after the road path and
+              designated stops are approved.
+            </Notice>
+          )}
           <button
             disabled={demo || busy || trip.status !== 'active' || !points.length}
             className="button button-primary full-width"

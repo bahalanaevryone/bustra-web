@@ -18,6 +18,12 @@ export interface Route {
   route_name: string
   origin: string
   destination: string
+  origin_latitude?: number | null
+  origin_longitude?: number | null
+  destination_latitude?: number | null
+  destination_longitude?: number | null
+  is_approved?: boolean
+  road_path?: [number, number][] | null
 }
 export interface PickupPoint {
   id: string

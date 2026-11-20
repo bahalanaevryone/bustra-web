@@ -38,6 +38,11 @@ async function mockAccount(page: Page, role: 'admin' | 'employee', assigned = tr
         route_name: 'TEST route',
         origin: 'Test origin',
         destination: 'Test destination',
+        is_approved: true,
+        road_path: [
+          [13.22, 120.59],
+          [13.23, 120.6],
+        ] as [number, number][] | null,
       },
     ],
     pickup_points: [
@@ -124,9 +129,23 @@ async function mockAccount(page: Page, role: 'admin' | 'employee', assigned = tr
         return route.fulfill({ json: records.trips[0].onboard_count })
       }
       if (name === 'manage_trip') {
-        const values = body.p_data as { status: string }
-        records.trips[0].status = values.status
-        return route.fulfill({ json: tripId })
+        const values = body.p_data as Record<string, unknown>
+        if (!body.p_id) {
+          const created = {
+            ...records.trips[0],
+            id: '00000000-0000-4000-8000-000000000039',
+            status: 'scheduled',
+            onboard_count: Number(values.initial_passenger_count),
+            departure_at: String(values.departure_at),
+          }
+          records.trips.push(created)
+          return route.fulfill({ json: created.id })
+        }
+        Object.assign(
+          records.trips.find((t) => t.id === body.p_id)!,
+          { status: values.status },
+        )
+        return route.fulfill({ json: body.p_id })
       }
       if (name === 'respond_pickup') {
         records.pickup_requests[0].status = String(body.p_status)
@@ -151,6 +170,10 @@ async function mockAccount(page: Page, role: 'admin' | 'employee', assigned = tr
           capacity: Number(values.capacity),
         })
         return route.fulfill({ json: records.buses[1].id })
+      }
+      if (name === 'admin_save' && body.p_entity === 'routes') {
+        Object.assign(records.routes[0], body.p_data)
+        return route.fulfill({ json: routeId })
       }
       return route.fulfill({ status: 204 })
     }
@@ -220,10 +243,8 @@ test('employee can count passengers, acknowledge requests, and start/stop GPS', 
   await noOverflow(page)
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.screenshot({ path: `.artifacts/employee-${info.project.name}.png`, fullPage: true })
-  await page.getByRole('button', { name: `Edit schedule ${tripId}`, exact: true }).click()
-  await page.getByRole('combobox', { name: 'Trip status', exact: true }).selectOption('completed')
   const mutation = page.waitForRequest((request) => request.url().endsWith('/rpc/manage_trip'))
-  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await page.getByRole('button', { name: `Complete trip ${tripId}`, exact: true }).click()
   const sent = (await mutation).postDataJSON() as { p_data: { departure_at: string } }
   expect(sent.p_data.departure_at).toBe(originalDeparture)
   await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -242,6 +263,8 @@ test('map separates the bus, waiting passenger and device, and traces configured
   context,
 }, info) => {
   const records = await mockAccount(page, 'employee')
+  records.routes[0].is_approved = false
+  records.routes[0].road_path = null
   records.pickup_points.push({
     ...records.pickup_points[0],
     id: '00000000-0000-4000-8000-000000000041',
@@ -293,11 +316,10 @@ test('map separates the bus, waiting passenger and device, and traces configured
   await expect(map.locator('.bus-marker.stale')).toHaveCount(0)
   await expect(map.locator('.map-symbol-waiting')).toHaveCount(1)
   await expect(map.locator('.map-symbol-destination')).toHaveText('B')
-  await expect(map.locator('path.leaflet-interactive[stroke-dasharray="9 9"]')).toHaveCount(1)
-  expect(roadRequests).toBe(0)
-  await map.getByRole('button', { name: 'Trace road route' }).click()
   await expect(
-    map.getByText('Solid line: estimated driving route.', { exact: false }),
+    map.getByText('Blue line: suggested driving path, not approved for bus service.', {
+      exact: false,
+    }),
   ).toBeVisible()
   await expect(map.locator('path.leaflet-interactive[stroke-dasharray="9 9"]')).toHaveCount(0)
   expect(roadRequests).toBe(1)
@@ -316,6 +338,8 @@ test('map keeps an honest stop guide when road routing fails and no bus GPS exis
   page,
 }) => {
   const records = await mockAccount(page, 'employee')
+  records.routes[0].is_approved = false
+  records.routes[0].road_path = null
   records.pickup_points.push({
     ...records.pickup_points[0],
     id: '00000000-0000-4000-8000-000000000041',
@@ -331,7 +355,105 @@ test('map keeps an honest stop guide when road routing fails and no bus GPS exis
   const map = page.getByRole('region', { name: 'Bus locations and pickup points' })
   await expect(map.getByRole('button', { name: 'Find bus', exact: true })).toBeDisabled()
   await expect(map.getByText('TEST 001: active trip, no reported GPS position yet.')).toBeVisible()
-  await map.getByRole('button', { name: 'Trace road route' }).click()
   await expect(map.getByRole('alert')).toContainText('Road routing is unavailable')
   await expect(map.locator('path.leaflet-interactive[stroke-dasharray="9 9"]')).toHaveCount(1)
+})
+
+test('employee schedule has six fields, generates the route name and sends the initial count', async ({
+  page,
+}, info) => {
+  await mockAccount(page, 'employee')
+  await page.goto('/employee?tab=trips')
+  await page.getByRole('button', { name: 'Add schedule', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByLabel('Route name', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByLabel('Route', { exact: true })).toHaveCount(0)
+  await expect(dialog.locator('input,select')).toHaveCount(6)
+  await dialog.getByRole('combobox', { name: 'Origin', exact: true }).selectOption('Test origin')
+  await dialog.getByRole('combobox', { name: 'Destination', exact: true }).selectOption('Test destination')
+  await expect(dialog.getByRole('status')).toContainText('Test origin → Test destination')
+  await dialog.getByRole('combobox', { name: 'Assigned Bus', exact: true }).selectOption(busId)
+  await dialog.getByRole('combobox', { name: 'Assigned Driver', exact: true }).selectOption(employeeId)
+  await dialog.getByLabel('Departure Date and Time', { exact: true }).fill('2026-11-25T08:00')
+  await dialog.getByLabel('Initial Passenger Count', { exact: true }).fill('41')
+  expect(
+    await dialog
+      .getByLabel('Initial Passenger Count')
+      .evaluate((el: HTMLInputElement) => el.validity.rangeOverflow),
+  ).toBe(true)
+  await dialog.getByLabel('Initial Passenger Count', { exact: true }).fill('7')
+  await noOverflow(page)
+  await dialog.screenshot({ path: `.artifacts/schedule-auto-${info.project.name}.png` })
+  const request = page.waitForRequest((r) => r.url().endsWith('/rpc/manage_trip'))
+  await dialog.getByRole('button', { name: 'Save changes' }).click()
+  const body = (await request).postDataJSON()
+  expect(body.p_id).toBe(null)
+  expect(body.p_data).toMatchObject({
+    origin: 'Test origin',
+    destination: 'Test destination',
+    bus_id: busId,
+    driver_id: employeeId,
+    initial_passenger_count: '7',
+    status: 'scheduled',
+  })
+  expect(body.p_data).not.toHaveProperty('route_name')
+  expect(body.p_data).not.toHaveProperty('route_id')
+  await expect(dialog).toHaveCount(0)
+  await expect(page.locator('tbody tr')).toHaveCount(2)
+})
+
+test('administrator reviews a road path before enabling bus-route pickups', async ({ page }) => {
+  const records = await mockAccount(page, 'admin')
+  records.routes[0].is_approved = false
+  records.routes[0].road_path = null
+  records.pickup_points.push({
+    ...records.pickup_points[0],
+    id: '00000000-0000-4000-8000-000000000041',
+    name: 'TEST end',
+    latitude: 13.23,
+    longitude: 120.6,
+    stop_order: 2,
+  })
+  await page.route('https://router.project-osrm.org/**', (r) =>
+    r.fulfill({
+      json: {
+        code: 'Ok',
+        routes: [
+          {
+            geometry: {
+              coordinates: [
+                [120.59, 13.22],
+                [120.595, 13.225],
+                [120.6, 13.23],
+              ],
+            },
+            distance: 1500,
+            duration: 200,
+          },
+        ],
+      },
+    }),
+  )
+  await page.goto('/admin?tab=routes')
+  await page.getByRole('button', { name: 'Edit route TEST route', exact: true }).click()
+  const dialog = page.getByRole('dialog'),
+    approval = dialog.getByRole('checkbox', {
+      name: 'Operator verified this road path and the pickup stops for bus service',
+    })
+  await expect(approval).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Preview road route', exact: true }).click()
+  await expect(dialog.locator('.route-review-map')).toBeVisible()
+  await expect(approval).toBeEnabled()
+  await expect(approval).not.toBeChecked()
+  await approval.check()
+  const request = page.waitForRequest((r) => r.url().endsWith('/rpc/admin_save'))
+  await dialog.getByRole('button', { name: 'Save changes' }).click()
+  const body = (await request).postDataJSON()
+  expect(body.p_data.is_approved).toBe(true)
+  expect(body.p_data.road_path).toEqual([
+    [13.22, 120.59],
+    [13.225, 120.595],
+    [13.23, 120.6],
+  ])
+  await expect(dialog).toHaveCount(0)
 })

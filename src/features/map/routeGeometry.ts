@@ -1,4 +1,4 @@
-import type { PickupPoint, MapRequest, PublicFeed } from '../../types'
+import type { PickupPoint, MapRequest, PublicFeed, Route } from '../../types'
 export type Coordinate = [number, number]
 export interface RouteGuide {
   routeId: string
@@ -8,6 +8,8 @@ export interface RouteGuide {
   stops: PickupPoint[]
   coordinates: Coordinate[]
   ordered: boolean
+  approved: boolean
+  roadPath: Coordinate[] | null
 }
 export function validCoordinate(latitude: unknown, longitude: unknown) {
   if (latitude == null || longitude == null || latitude === '' || longitude === '') return false
@@ -29,8 +31,27 @@ export function getRouteGuides(
           (p) => p.route_id === route.id && p.is_active && validCoordinate(p.latitude, p.longitude),
         )
         .sort((a, b) => a.stop_order - b.stop_order || a.id.localeCompare(b.id))
+      const coordinates: Coordinate[] = []
+      const add = (lat: unknown, lng: unknown) => {
+        if (!validCoordinate(lat, lng)) return
+        const p: Coordinate = [Number(lat), Number(lng)]
+        if (!coordinates.length || distanceKm(coordinates[coordinates.length - 1], p) > 0.001)
+          coordinates.push(p)
+      }
+      add(route.origin_latitude, route.origin_longitude)
+      for (const p of stops) add(p.latitude, p.longitude)
+      add(route.destination_latitude, route.destination_longitude)
       const ordered =
-        stops.length >= 2 && new Set(stops.map((p) => p.stop_order)).size === stops.length
+        coordinates.length >= 2 && new Set(stops.map((p) => p.stop_order)).size === stops.length
+      const roadPath =
+        route.is_approved === true &&
+        Array.isArray(route.road_path) &&
+        route.road_path.length >= 2 &&
+        route.road_path.every(
+          (p) => Array.isArray(p) && p.length === 2 && validCoordinate(p[0], p[1]),
+        )
+          ? route.road_path
+          : null
       return {
         routeId: route.id,
         name: route.route_name,
@@ -38,9 +59,9 @@ export function getRouteGuides(
         destination: route.destination,
         stops,
         ordered,
-        coordinates: ordered
-          ? stops.map((p) => [Number(p.latitude), Number(p.longitude)] as Coordinate)
-          : [],
+        coordinates: ordered ? coordinates : [],
+        approved: route.is_approved === true && !!roadPath,
+        roadPath,
       }
     })
 }
@@ -72,4 +93,33 @@ export function escapeHtml(value: string) {
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   )
+}
+export function validPickupPoints(route: Route | undefined, points: PickupPoint[]) {
+  if (
+    !route?.is_approved ||
+    !Array.isArray(route.road_path) ||
+    route.road_path.length < 2 ||
+    route.road_path.some((p) => !Array.isArray(p) || p.length !== 2 || !validCoordinate(p[0], p[1]))
+  )
+    return []
+  const path = route.road_path
+  return points.filter((p) => {
+    if (p.route_id !== route.id || !p.is_active || !validCoordinate(p.latitude, p.longitude))
+      return false
+    const scale = 111195 * Math.cos((Number(p.latitude) * Math.PI) / 180)
+    for (let i = 0; i < path.length - 1; i++) {
+      const ax = (path[i][1] - Number(p.longitude)) * scale,
+        ay = (path[i][0] - Number(p.latitude)) * 111195
+      const bx = (path[i + 1][1] - Number(p.longitude)) * scale,
+        by = (path[i + 1][0] - Number(p.latitude)) * 111195
+      const dx = bx - ax,
+        dy = by - ay,
+        t =
+          dx * dx + dy * dy
+            ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy)))
+            : 0
+      if (Math.hypot(ax + t * dx, ay + t * dy) <= 100) return true
+    }
+    return false
+  })
 }

@@ -83,7 +83,19 @@ test('live pickup intent is preserved through guest login', async ({ page }) => 
     route.fulfill({
       json: {
         buses: [{ id: 'bus', plate_number: 'TEST BUS', capacity: 40 }],
-        routes: [{ id: 'route', route_name: 'Test route', origin: 'A', destination: 'B' }],
+        routes: [
+          {
+            id: 'route',
+            route_name: 'A → B',
+            origin: 'A',
+            destination: 'B',
+            is_approved: true,
+            road_path: [
+              [13.22, 120.59],
+              [13.23, 120.6],
+            ],
+          },
+        ],
         trips: [
           {
             id: 'trip',

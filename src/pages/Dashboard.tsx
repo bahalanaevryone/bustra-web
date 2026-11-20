@@ -133,6 +133,7 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
       ['route_name', 'Route'],
       ['origin', 'Origin'],
       ['destination', 'Destination'],
+      ['is_approved', 'Operator approved'],
     ],
     pickup_points: [
       ['name', 'Pickup point'],
@@ -561,6 +562,33 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
                           {editable && (
                             <td>
                               <div className="inline-actions">
+                                {tableEntity === 'trips' &&
+                                  !['completed', 'cancelled'].includes(String(row.status)) &&
+                                  (admin || row.driver_id === user?.id) &&
+                                  (row.status === 'active'
+                                    ? ['completed', 'cancelled']
+                                    : ['active', 'cancelled']
+                                  ).map((status) => (
+                                    <button
+                                      key={status}
+                                      className="button button-outline button-small"
+                                      disabled={busy}
+                                      aria-label={`${status === 'active' ? 'Start' : status === 'completed' ? 'Complete' : 'Cancel'} trip ${row.id}`}
+                                      onClick={() =>
+                                        void action(
+                                          'manage_trip',
+                                          { p_id: row.id, p_data: { ...row, status } },
+                                          'Trip status updated.',
+                                        )
+                                      }
+                                    >
+                                      {status === 'active'
+                                        ? 'Start'
+                                        : status === 'completed'
+                                          ? 'Complete'
+                                          : 'Cancel'}
+                                    </button>
+                                  ))}
                                 <button
                                   className="icon-button"
                                   aria-label={`Edit ${entityNames[tableEntity]} ${String(row.plate_number || row.first_name || row.route_name || row.name || row.id)}`}

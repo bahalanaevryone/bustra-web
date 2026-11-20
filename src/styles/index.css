@@ -467,6 +467,8 @@ table tr:last-child td {
 }
 
 /* Shared map symbols and route details. Request markers remain scoped by RLS. */
+.route-review-map { height: 240px; width: 100%; margin: 12px 0; border-radius: 8px; }
+.route-review .checkbox-field { margin-top: 14px; }
 body .map-shell.map-with-details {
   height: auto;
   overflow: visible;

@@ -8,8 +8,15 @@ export interface RoadRoute {
 const cache = new Map<string, Promise<RoadRoute>>()
 let queue: Promise<unknown> = Promise.resolve()
 let lastRequest = 0
+export function routingConfigured() {
+  return !!import.meta.env.VITE_ROUTING_URL?.trim()
+}
 export function requestRoadRoute(coordinates: Coordinate[]): Promise<RoadRoute> {
-  const base = import.meta.env.VITE_ROUTING_URL || 'https://router.project-osrm.org'
+  const base = import.meta.env.VITE_ROUTING_URL?.trim()
+  if (!base)
+    return Promise.reject(
+      new Error('Road routing is not configured. Only the stop guide is available.'),
+    )
   const key = base + JSON.stringify(coordinates)
   const previous = cache.get(key)
   if (previous) return previous

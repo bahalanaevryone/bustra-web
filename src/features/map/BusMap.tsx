@@ -25,13 +25,14 @@ import type { MapRequest, PublicFeed } from '../../types'
 import { isFresh, locationAge } from '../../lib/utils'
 import {
   escapeHtml,
+  distanceKm,
   farFromRoute,
   getRouteGuides,
   getWaitingAtStop,
   validCoordinate,
 } from './routeGeometry'
 import type { Coordinate } from './routeGeometry'
-import { requestRoadRoute } from './roadRouting'
+import { requestRoadRoute, routingConfigured } from './roadRouting'
 import type { RoadRoute } from './roadRouting'
 
 const center: Coordinate = [
@@ -159,7 +160,9 @@ export function BusMap({
   const selectedLocation = locations.find((l) => l.trip_id === selected)
   const focusedLocation = selectedLocation || locations[0]
   const points = guides.flatMap((g) =>
-    g.stops.map((p) => [Number(p.latitude), Number(p.longitude)] as Coordinate),
+    g.coordinates.length
+      ? g.coordinates
+      : g.stops.map((p) => [Number(p.latitude), Number(p.longitude)] as Coordinate),
   )
   const initialPoints = points.length
     ? points
@@ -202,7 +205,7 @@ export function BusMap({
     setRoutingError('')
     try {
       // Routing receives configured stops, never passenger or device GPS.
-      for (const guide of guides.filter((g) => g.ordered)) {
+      for (const guide of guides.filter((g) => g.ordered && !g.approved)) {
         const key = JSON.stringify(guide.coordinates)
         const road = await requestRoadRoute(guide.coordinates)
         setRoadRoutes((previous) => ({ ...previous, [key]: road }))
@@ -214,6 +217,31 @@ export function BusMap({
     }
   }
   const hasLine = guides.some((g) => g.ordered)
+  const geometryKey = JSON.stringify(guides.map((g) => [g.routeId, g.coordinates, g.approved]))
+  useEffect(() => {
+    if (demo || !routingConfigured()) return
+    let disposed = false
+    setRoutingError('')
+    void (async () => {
+      for (const guide of guides.filter((g) => g.ordered && !g.approved)) {
+        if (disposed) return
+        try {
+          const road = await requestRoadRoute(guide.coordinates)
+          if (!disposed)
+            setRoadRoutes((previous) => ({
+              ...previous,
+              [JSON.stringify(guide.coordinates)]: road,
+            }))
+        } catch (e) {
+          if (!disposed)
+            setRoutingError(e instanceof Error ? e.message : 'Road routing is unavailable.')
+        }
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [geometryKey, demo])
   return (
     <div
       className={`map-shell ${large ? 'map-large' : ''} map-with-details`}
@@ -251,12 +279,12 @@ export function BusMap({
               return (
                 <Polyline
                   key={guide.routeId}
-                  positions={road?.coordinates || guide.coordinates}
+                  positions={guide.roadPath || road?.coordinates || guide.coordinates}
                   pathOptions={{
-                    color: '#2766dc',
-                    weight: road ? 5 : 4,
+                    color: guide.approved ? '#287b59' : '#2766dc',
+                    weight: guide.roadPath || road ? 5 : 4,
                     opacity: 0.8,
-                    dashArray: road ? undefined : '9 9',
+                    dashArray: guide.roadPath || road ? undefined : '9 9',
                   }}
                 >
                   <Popup>
@@ -265,19 +293,53 @@ export function BusMap({
                       {guide.origin} → {guide.destination}
                     </p>
                     <p>
-                      {road
-                        ? 'Estimated driving route through the configured stops. Verify bus access with the operator.'
-                        : 'Stop-to-stop guide. Dashed segments connect ordered stops and do not represent the road path.'}
+                      {guide.approved
+                        ? 'Operator-reviewed bus route. Pickup requests are limited to its approved stops.'
+                        : road
+                          ? 'Suggested driving path only. This road path is not approved for bus service.'
+                          : 'Stop-to-stop guide. Dashed segments connect ordered stops and do not represent the road path.'}
                     </p>
                   </Popup>
                 </Polyline>
               )
             })}
           {guides.flatMap((guide) =>
-            guide.stops.map((point, index) => {
+            guide.ordered
+              ? [0, guide.coordinates.length - 1].map((index, i) => {
+                  const position = guide.coordinates[index]
+                  if (
+                    guide.stops.some(
+                      (p) =>
+                        Number(p.latitude) === position[0] && Number(p.longitude) === position[1],
+                    )
+                  )
+                    return null
+                  return (
+                    <Marker
+                      key={`${guide.routeId}-endpoint-${i}`}
+                      position={position}
+                      icon={simpleIcon(i === 0 ? 'origin' : 'destination', i === 0 ? 'A' : 'B')}
+                      title={i === 0 ? 'Origin' : 'Destination'}
+                    >
+                      <Popup>
+                        {i === 0 ? guide.origin : guide.destination}
+                        <p>
+                          Route endpoint. Pickup is available only at an approved designated stop.
+                        </p>
+                      </Popup>
+                    </Marker>
+                  )
+                })
+              : [],
+          )}
+          {guides.flatMap((guide) =>
+            guide.stops.map((point) => {
               const counts = getWaitingAtStop(waitingRequests, feed, point.id)
-              const origin = guide.ordered && index === 0
-              const destination = guide.ordered && index === guide.stops.length - 1
+              const stopPosition: Coordinate = [Number(point.latitude), Number(point.longitude)]
+              const origin = guide.ordered && distanceKm(stopPosition, guide.coordinates[0]) < 0.001
+              const destination =
+                guide.ordered &&
+                distanceKm(stopPosition, guide.coordinates[guide.coordinates.length - 1]) < 0.001
               const kind = counts.pending
                 ? 'waiting'
                 : counts.accepted
@@ -488,7 +550,7 @@ export function BusMap({
               {guides.length} configured route{guides.length === 1 ? '' : 's'}
             </span>
           )}
-          {hasLine && (
+          {hasLine && routingConfigured() && guides.some((g) => !g.approved) && (
             <button
               className="text-button"
               disabled={routing}
@@ -502,12 +564,26 @@ export function BusMap({
           )}
         </div>
         <p className="map-route-note">
-          {hasLine
-            ? Object.keys(roadRoutes).some((key) => guides.some((g) => routeKey(g.routeId) === key))
-              ? 'Solid line: estimated driving route. Dashed line: stop-to-stop guide. Routing: OSRM / OpenStreetMap.'
-              : 'Dashed line: ordered stops joined as a guide. Trace road route to follow mapped roads.'
-            : 'A route line needs at least two active pickup points with different stop-order numbers.'}
+          {guides.some((g) => g.approved)
+            ? 'Green line: operator-reviewed bus route. Pickups use approved stops only.'
+            : ''}{' '}
+          {Object.keys(roadRoutes).some((key) =>
+            guides.some((g) => routeKey(g.routeId) === key && !g.approved),
+          )
+            ? 'Blue line: suggested driving path, not approved for bus service. Routing: OSRM / OpenStreetMap.'
+            : hasLine
+              ? 'Dashed line: endpoint and stop guide, not a road route.'
+              : 'A route guide needs verified endpoints or at least two ordered stops.'}
+          {!routingConfigured() &&
+            !guides.every((g) => g.approved) &&
+            ' Road routing is not configured.'}
         </p>
+        {guides.some((g) => !g.approved) && (
+          <p className="map-route-note">
+            Routes awaiting operator review cannot accept pickup requests. Driving directions do not
+            establish bus approval.
+          </p>
+        )}
         {(pending > 0 || waitingRequests.some((r) => r.status === 'accepted')) && (
           <p className="map-route-note">
             Request markers show designated stops visible to your account, not passengers’ device

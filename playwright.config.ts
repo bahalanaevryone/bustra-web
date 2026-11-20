@@ -6,7 +6,7 @@ export default defineConfig({
   timeout: 45000,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: 'http://127.0.0.1:5180',
     headless: true,
     channel: 'chrome',
     trace: 'retain-on-failure',
@@ -17,8 +17,9 @@ export default defineConfig({
   ],
   webServer: {
     command:
-      'node node_modules/vite/bin/vite.js --configLoader native --host 127.0.0.1 --port 5173 --strictPort',
-    url: 'http://127.0.0.1:5173',
+      'node node_modules/vite/bin/vite.js --configLoader native --host 127.0.0.1 --port 5180 --strictPort',
+    url: 'http://127.0.0.1:5180',
+    env: { VITE_ROUTING_URL: 'https://router.project-osrm.org' },
     reuseExistingServer: !process.env.CI,
     timeout: 30000,
   },

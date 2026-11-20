@@ -2,6 +2,10 @@
 
 Apply the initial migration only after inspecting the target project's current schema. It is intentionally not a destructive reconciliation script. Use the SQL Editor workflow in the README; do not enable permissive policies to work around configuration errors.
 
+For an existing BUSTRA database, apply only the new additive migration [`20261120050109_automatic_schedule_routes.sql`](../supabase/migrations/20261120050109_automatic_schedule_routes.sql). It retains all seven tables and trip references, adds normalized endpoint uniqueness and reviewed road geometry, and replaces public RPCs with wrappers that preserve their original safeguards. Existing duplicate endpoint pairs cause an atomic refusal; review their dependent trips/stops before retrying rather than deleting them blindly. The current hosted project has already received this upgrade.
+
+Routes remain unapproved until an administrator reviews the road path and active stops. Configure the public `VITE_ROUTING_URL` Actions variable for the hosted build and the equivalent local `.env.local` value for local previews, then rebuild/restart as appropriate. An empty value disables routing. The existing seed is illustrative and is not transport approval. Do not mark it approved just to bypass validation.
+
 If Auth accounts already existed before the profile trigger was installed, run this trusted, one-time backfill after reviewing those accounts. It forces all of them to the passenger role. Bootstrap the one admin separately using its exact UUID.
 
 ```sql
