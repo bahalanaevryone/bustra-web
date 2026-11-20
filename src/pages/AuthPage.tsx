@@ -13,16 +13,13 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'reset' | 'upd
   const update = mode === 'update-password'
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const registrationSubmitted = mode === 'login' && params.get('registered') === '1'
   const intended = safeReturn(params.get('returnTo'))
   const { user, profile, error: accountError } = useAuth()
   const [visible, setVisible] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [message, setMessage] = useState(
-    params.get('registered') === '1'
-      ? 'Account registration submitted. Check your email to verify your account if confirmation is enabled, then sign in.'
-      : '',
-  )
+  const [message, setMessage] = useState('')
   useEffect(() => {
     if (mode === 'login' && user && profile && params.get('registered') !== '1')
       navigate(
@@ -142,6 +139,20 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'reset' | 'upd
                   : 'Good to see you. Let’s get you on your way.'}
           </p>
           {(error || accountError) && <Notice tone="error">{error || accountError}</Notice>}
+          {registrationSubmitted && (
+            <Notice>
+              <strong>Confirm your email before signing in.</strong>
+              <p>
+                Open the BUSTRA confirmation email and click the confirmation link to activate your
+                account.
+              </p>
+              <p>
+                <strong>
+                  Important: Check your Spam or Junk folder if the email is not in your Inbox.
+                </strong>
+              </p>
+            </Notice>
+          )}
           {message && <Notice tone="success">{message}</Notice>}
           <form
             onSubmit={(e) => {
@@ -244,6 +255,9 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'reset' | 'upd
               <p className="form-help">
                 All new accounts are passenger accounts. Staff access is assigned by the
                 administrator.
+                <br />
+                After registering, confirm your email before signing in.{' '}
+                <strong>Check your Inbox and Spam/Junk folder for the confirmation email.</strong>
               </p>
             )}
             <button className="button button-primary full-width" type="submit" disabled={busy}>
