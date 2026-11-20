@@ -455,6 +455,16 @@ table tr:last-child td {
   letter-spacing: 0.025em;
   margin-top: 5px;
 }
+.brand-icon.brand-icon-image {
+  border: 0;
+  transform: none;
+  overflow: hidden;
+}
+.brand-icon-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 .brand-light {
   color: white;
 }

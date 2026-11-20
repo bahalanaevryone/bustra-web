@@ -24,6 +24,10 @@ VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 
 The publishable key belongs in a browser app; it grants no administrative access. Never add a Supabase secret or service-role key. `.env.local`, generated artifacts, dependencies, and build output are ignored by Git. Environment variables are embedded at **build time**; rebuild after changing them.
 
+## Your BUSTRA logo
+
+Save your PNG logo as **`public/bustra-logo.png`**. The shared branding component automatically loads it in the navigation, account pages, footer, and dashboards, and uses it as the browser tab icon after loading. Until that file exists, the existing bus symbol and SVG favicon remain available. Use an actual PNG file; renaming a JPEG does not convert its format.
+
 ## Set up Supabase
 
 1. Open your intended project in the [Supabase dashboard](https://supabase.com/dashboard). Inspect existing tables first. The initial migration expects the seven BUSTRA tables not to exist; do not run it over a different existing BUSTRA schema.

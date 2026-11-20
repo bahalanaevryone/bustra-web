@@ -1,13 +1,28 @@
 import { BusFront, MapPin, X, LoaderCircle } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 export function Brand({ light = false }: { light?: boolean }) {
+  const [logoLoaded, setLogoLoaded] = useState(false)
   return (
     <Link to="/" className={`brand ${light ? 'brand-light' : ''}`} aria-label="BUSTRA home">
-      <span className="brand-icon">
-        <BusFront size={29} strokeWidth={1.7} />
+      <span className={`brand-icon${logoLoaded ? ' brand-icon-image' : ''}`}>
+        <img
+          src="/bustra-logo.png"
+          alt=""
+          hidden={!logoLoaded}
+          onLoad={() => {
+            setLogoLoaded(true)
+            const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+            if (favicon) {
+              favicon.type = 'image/png'
+              favicon.href = '/bustra-logo.png'
+            }
+          }}
+          onError={() => setLogoLoaded(false)}
+        />
+        {!logoLoaded && <BusFront size={29} strokeWidth={1.7} />}
       </span>
       <span>
         BUSTRA<span className="brand-caption">A better way to get there.</span>
