@@ -2,14 +2,8 @@
   "status": "insufficient_data",
   "reason": "Collect at least 60 GPS-verified observations from 30 complete distinct trips; at least 20 training and 6 future holdout trips must survive chronological purging.",
   "dataset_sha256": "312b96e81d443082704dad46e87da27de2fae34eab4f2a94eb969b8db2d9a089",
-  "features": [
-    "road_distance_km",
-    "speed_kmh",
-    "speed_missing",
-    "hour_sin",
-    "hour_cos",
-    "weekday"
-  ],
+  "data_kind": "verified_observations",
+  "features": ["road_distance_km", "speed_kmh", "speed_missing", "hour_sin", "hour_cos", "weekday"],
   "timezone": "Asia/Manila",
   "valid_rows": 0,
   "ignored_rows": 0,

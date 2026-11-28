@@ -46,6 +46,7 @@ export interface BusLocation {
   updated_at: string
   speed_kmh?: number
   accuracy_m?: number
+  course_degrees?: number | null
 }
 export interface PickupRequest {
   id: string

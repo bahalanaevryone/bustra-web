@@ -29,6 +29,8 @@ import { Brand, Empty, Loading, Modal, Notice, Status } from '../components/ui'
 import { BusMap } from '../features/map/BusMap'
 import { EntityEditor, entityNames } from '../features/admin/EntityEditor'
 import { RoleAudit } from '../features/admin/RoleAudit'
+import { AiStatus } from '../features/eta/AiStatus'
+import { RouteDiagnostics } from '../features/eta/RouteDiagnostics'
 import type { RecordData } from '../features/admin/EntityEditor'
 import type { Entity } from '../types'
 import { rpc } from '../lib/supabase/client'
@@ -40,12 +42,15 @@ const adminTabs: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'buses', label: 'Buses', icon: BusFront },
   { key: 'trips', label: 'Schedules', icon: CalendarDays },
   { key: 'routes', label: 'Routes', icon: RouteIcon },
+  { key: 'ai', label: 'AI Status', icon: Radio },
+  { key: 'diagnostics', label: 'Route diagnostics', icon: RouteIcon },
 ]
 const employeeTabs = [
   adminTabs[0],
   { key: 'map', label: 'Live map', icon: MapPin },
   adminTabs[3],
   adminTabs[2],
+  adminTabs[6],
 ]
 export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
   const admin = kind === 'admin'
@@ -251,6 +256,22 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
           )}
           {(error || loadError) && <Notice tone="error">{error || loadError}</Notice>}
           {message && <Notice tone="success">{message}</Notice>}
+          {admin && tab === 'ai' && <AiStatus />}
+          {tab === 'diagnostics' && (
+            <RouteDiagnostics
+              data={data}
+              initialTrip={selectedTrip?.id}
+              onReview={
+                admin
+                  ? (id) =>
+                      setEditor({
+                        entity: 'routes',
+                        record: data.routes.find((r) => r.id === id) as unknown as RecordData,
+                      })
+                  : undefined
+              }
+            />
+          )}
           {(tab === 'overview' || tab === 'map') && (
             <>
               <div className="dashboard-overview">
@@ -369,6 +390,9 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
                         <p className="form-help" role="status">
                           {gps.status}
                           {gps.lastUpdate && ` Last sent ${time(gps.lastUpdate)}.`}
+                        </p>
+                        <p className="form-help" role="status">
+                          {gps.collectionStatus}
                         </p>
                         <p className="form-help">
                           Keep this page active. GPS may pause when the browser is backgrounded or
@@ -541,7 +565,7 @@ export function Dashboard({ kind }: { kind: 'admin' | 'employee' }) {
               )}
             </>
           )}
-          {tab !== 'map' && (
+          {tab !== 'map' && tab !== 'ai' && tab !== 'diagnostics' && (
             <section className="card management-card">
               <div className="card-heading">
                 <h2>

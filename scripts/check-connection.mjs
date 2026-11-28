@@ -12,6 +12,19 @@ for (const [name, path, options, expectDenied] of [
     { method: 'POST', body: JSON.stringify({ p_trip: '00000000-0000-4000-8000-000000000000' }) },
     true,
   ],
+  ['AI status API schema', '/rest/v1/rpc/eta_ai_status', { method: 'POST', body: '{}' }, true],
+  [
+    'Route diagnostics API schema',
+    '/rest/v1/rpc/eta_diagnostic_context',
+    { method: 'POST', body: JSON.stringify({ p_trip: '00000000-0000-4000-8000-000000000000' }) },
+    true,
+  ],
+  [
+    'Collection target API schema',
+    '/rest/v1/rpc/eta_collection_targets',
+    { method: 'POST', body: JSON.stringify({ p_trip: '00000000-0000-4000-8000-000000000000' }) },
+    true,
+  ],
   [
     'Admin role API schema',
     '/rest/v1/rpc/admin_update_user',

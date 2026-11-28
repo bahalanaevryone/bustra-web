@@ -26,6 +26,50 @@ export interface EtaResult {
   movement?: string
   model_version?: string
   routing_minutes?: number
+  diagnostics?: RouteDiagnostics
+  route_path?: Point[]
+}
+export interface RouteDiagnostics {
+  corridor_limit_m: number
+  bus_offset_m: number | null
+  pickup_offset_m: number | null
+  remaining_path_m: number | null
+  origin_offset_m: number | null
+  destination_offset_m: number | null
+  coordinate_order: 'latitude_longitude'
+  projection_issue?: string
+}
+export function routeDiagnostics(
+  fix: Fix | null,
+  pickup: Point | null,
+  path: Point[],
+  origin?: Point,
+  destination?: Point,
+): RouteDiagnostics {
+  let projectionIssue: string | undefined
+  const locate = (point: Point) => {
+    try {
+      return project(point, path)
+    } catch (e) {
+      if (!(e instanceof EtaUnavailable)) throw e
+      projectionIssue = e.code
+      return null
+    }
+  }
+  const bus =
+    fix && validPoint([fix.latitude, fix.longitude]) ? locate([fix.latitude, fix.longitude]) : null
+  const target = pickup && validPoint(pickup) ? locate(pickup) : null
+  return {
+    corridor_limit_m: 150,
+    bus_offset_m: bus ? Math.round(bus.distance) : null,
+    pickup_offset_m: target ? Math.round(target.distance) : null,
+    remaining_path_m: bus && target ? Math.round(target.progress - bus.progress) : null,
+    origin_offset_m: origin && validPoint(origin) ? Math.round(metres(path[0], origin)) : null,
+    destination_offset_m:
+      destination && validPoint(destination) ? Math.round(metres(path.at(-1)!, destination)) : null,
+    coordinate_order: 'latitude_longitude',
+    ...(projectionIssue ? { projection_issue: projectionIssue } : {}),
+  }
 }
 export function validPoint(p: unknown): p is Point {
   return (
@@ -118,10 +162,15 @@ export function checkFix(fix: Fix | null, now = Date.now()) {
 export function approach(fix: Fix, pickup: Point, path: Point[]) {
   const bus = project([fix.latitude, fix.longitude], path),
     target = project(pickup, path)
-  if (bus.distance > 150 || target.distance > 150)
+  if (bus.distance > 150)
     throw new EtaUnavailable(
-      'off_route',
-      'The bus or pickup pin is too far from the assigned road path. Move the pin closer or wait for the bus.',
+      'bus_off_route',
+      `The reported bus GPS is ${Math.round(bus.distance)} m from the assigned road path (limit: 150 m). The driver must verify the GPS and assigned route. Moving your pickup pin will not fix the bus position.`,
+    )
+  if (target.distance > 150)
+    throw new EtaUnavailable(
+      'pickup_off_route',
+      `Your pickup pin is ${Math.round(target.distance)} m from the assigned road path (limit: 150 m). Place it on the road actually served by this bus.`,
     )
   if (
     metres([fix.latitude, fix.longitude], pickup) <= 50 &&
@@ -155,6 +204,46 @@ export interface RoadResult {
   coordinates: Point[]
   distance: number
   duration: number
+}
+export interface AssignedRoute {
+  road_path?: Point[] | null
+  is_approved?: boolean
+  origin_lat: number
+  origin_lng: number
+  destination_lat: number
+  destination_lng: number
+}
+export async function assignedRoadPath(
+  route: AssignedRoute,
+  router: (points: Point[]) => Promise<RoadResult>,
+) {
+  const origin: Point = [route.origin_lat, route.origin_lng],
+    destination: Point = [route.destination_lat, route.destination_lng]
+  if (!validPoint(origin) || !validPoint(destination))
+    throw new EtaUnavailable(
+      'route_unavailable',
+      'The assigned route endpoints are missing or invalid. Coordinates must be latitude, longitude.',
+    )
+  if (route.road_path != null) {
+    if (route.road_path.length < 2 || !route.road_path.every(validPoint))
+      throw new EtaUnavailable(
+        'route_unavailable',
+        'The saved road geometry is invalid. Review and regenerate it.',
+      )
+    if (
+      metres(route.road_path[0], origin) > 150 ||
+      metres(route.road_path.at(-1)!, destination) > 150
+    )
+      throw new EtaUnavailable(
+        'route_endpoints_mismatch',
+        'The saved road path does not start/end at the assigned route endpoints. Review the direction and regenerate the correct road path.',
+      )
+    return {
+      path: route.road_path,
+      source: route.is_approved ? 'stored_reviewed' : 'stored_suggested',
+    }
+  }
+  return { path: (await router([origin, destination])).coordinates, source: 'router_suggestion' }
 }
 export async function roadRoute(
   base: string,
@@ -294,20 +383,41 @@ export function modelPrediction(
   if (!model || typeof model !== 'object') return null
   const m = model as Record<string, any>
   if (
+    m.metrics?.raw_model_mae_minutes !== undefined &&
+    (!Number.isFinite(m.metrics.raw_model_mae_minutes) ||
+      m.metrics.raw_model_mae_minutes >= m.metrics.routing_mae_minutes)
+  )
+    return null
+  if (
+    m.metrics?.supported_holdout_trips !== undefined &&
+    (!Number.isFinite(m.metrics.supported_holdout_trips) || m.metrics.supported_holdout_trips < 6)
+  )
+    return null
+  if (
     m.schema_version !== 1 ||
     m.algorithm !== 'LinearRegression' ||
     m.eligible !== true ||
+    typeof m.version !== 'string' ||
     !m.version ||
+    m.data_kind === 'test_fixture' ||
     JSON.stringify(m.features) !== JSON.stringify(FEATURES) ||
     m.timezone !== 'Asia/Manila'
   )
     return null
-  if (!(
-    m.metrics?.holdout_trips >= 6 &&
-    m.metrics?.training_trips >= 20 &&
-    m.metrics?.model_mae_minutes >= 0 &&
-    m.metrics?.model_mae_minutes < m.metrics?.routing_mae_minutes
-  ))
+  if (
+    ![
+      m.metrics?.holdout_trips,
+      m.metrics?.training_trips,
+      m.metrics?.model_mae_minutes,
+      m.metrics?.routing_mae_minutes,
+    ].every(Number.isFinite) ||
+    !(
+      m.metrics?.holdout_trips >= 6 &&
+      m.metrics?.training_trips >= 20 &&
+      m.metrics?.model_mae_minutes >= 0 &&
+      m.metrics?.model_mae_minutes < m.metrics?.routing_mae_minutes
+    )
+  )
     return null
   if (
     ![m.coefficients, m.mean, m.scale, m.minimum, m.maximum].every(
@@ -321,6 +431,7 @@ export function modelPrediction(
       (v, i) =>
         !Number.isFinite(v) ||
         m.scale[i] <= 0 ||
+        m.minimum[i] > m.maximum[i] ||
         v < m.minimum[i] - 1e-9 ||
         v > m.maximum[i] + 1e-9,
     )

@@ -53,6 +53,8 @@ class TrainingTests(unittest.TestCase):
             self.assertEqual(metrics["holdout_trips"], 6)
             artifact = json.loads((root / "output/model.json").read_text())
             self.assertEqual(artifact["features"], FEATURES)
+            self.assertEqual(artifact["data_kind"], "test_fixture")
+            self.assertFalse(artifact["eligible"])
             loaded, _ = load_rows(csv_path)
             x = np.array([loaded[0]["x"]])
             prediction = artifact["intercept"] + sum((v-m)/s*c for v, m, s, c in zip(x[0], artifact["mean"], artifact["scale"], artifact["coefficients"]))

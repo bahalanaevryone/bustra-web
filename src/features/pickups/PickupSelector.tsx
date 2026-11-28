@@ -9,7 +9,9 @@ import { rpc } from '../../lib/supabase/client'
 import { errorMessage } from '../../lib/utils'
 import { reverseLocation } from '../schedules/geocoding'
 import { PickupMap } from './PickupMap'
-import { EtaPanel } from '../eta/EtaPanel'
+import { EtaPanelContent } from '../eta/EtaPanel'
+import { useEta } from '../eta/useEta'
+import { useData } from '../../hooks/useData'
 import { requireClient } from '../../lib/supabase/client'
 import '../../styles/schedule.css'
 
@@ -32,6 +34,9 @@ export function PickupSelector({
   onSent: () => void
 }) {
   const [pin, setPin] = useState<Coordinate | null>(null)
+  const eta = useEta(tripId, pin)
+  const { feed } = useData()
+  const location = feed.locations.find((l) => l.trip_id === tripId)
   const [address, setAddress] = useState('')
   const [gpsMessage, setGpsMessage] = useState(
     'Tap the map to choose a pickup location, or use your current location.',
@@ -174,7 +179,7 @@ export function PickupSelector({
         <strong>Selected bus: {busLabel}</strong>
       </p>
       <p>{route?.route_name}</p>
-      <EtaPanel tripId={tripId} pin={pin} />
+      <EtaPanelContent tripId={tripId} eta={eta} />
       <div className="inline-actions">
         <button
           className="button button-outline button-small"
@@ -201,7 +206,14 @@ export function PickupSelector({
       <p className="form-help" role="status">
         {gpsMessage}
       </p>
-      <PickupMap route={route} pin={pin} onPlace={place} disabled={busy} />
+      <PickupMap
+        route={route}
+        roadPath={eta.result?.route_path}
+        location={location}
+        pin={pin}
+        onPlace={place}
+        disabled={busy}
+      />
       {pin && (
         <>
           <p className="pickup-coordinates">

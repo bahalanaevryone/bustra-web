@@ -7,6 +7,7 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
   const [sharing, setSharing] = useState(false)
   const [status, setStatus] = useState('Location sharing is off.')
   const [lastUpdate, setLastUpdate] = useState<string>()
+  const [collectionStatus, setCollectionStatus] = useState('AI data: waiting for location sharing.')
   const generation = useRef(0)
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -52,6 +53,7 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
     const currentGeneration = ++generation.current
     let lastWrite = 0
     let lastCollection = 0
+    let collecting = false
     let writing = false
     let lastCoords: [number, number] | null = null
     setSharing(true)
@@ -91,9 +93,16 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
           if (currentGeneration !== generation.current) return
           lastWrite = Date.now()
           lastCoords = [latitude, longitude]
-          if (tripId && Date.now() - lastCollection >= 60000) {
+          if (tripId && !collecting && Date.now() - lastCollection >= 60000) {
             lastCollection = Date.now()
+            collecting = true
             void collectEtaObservations(tripId)
+              .then((message) => {
+                if (currentGeneration === generation.current) setCollectionStatus(message)
+              })
+              .finally(() => {
+                collecting = false
+              })
           }
           setLastUpdate(new Date().toISOString())
           setStatus(`Sharing location · accuracy ±${Math.round(accuracy)} m`)
@@ -125,5 +134,5 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
     sharing && lastUpdate && now - Date.parse(lastUpdate) > 90000
       ? 'Last bus location is outdated. Waiting for a fresh device position; keep this page active with precise location enabled.'
       : status
-  return { sharing, status: displayStatus, lastUpdate, start, stop }
+  return { sharing, status: displayStatus, collectionStatus, lastUpdate, start, stop }
 }

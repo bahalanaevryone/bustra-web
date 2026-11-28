@@ -72,7 +72,8 @@ def train(csv_file, output, random_forest=False):
     rows, ignored = load_rows(csv_file)
     train_rows, test_rows = chronological_split(rows)
     counts = dict(valid_rows=len(rows), ignored_rows=ignored, training_rows=len(train_rows), holdout_rows=len(test_rows), training_trips=len({r["trip"] for r in train_rows}), holdout_trips=len({r["trip"] for r in test_rows}))
-    metadata = dict(dataset_sha256=hashlib.sha256(csv_file.read_bytes()).hexdigest(), features=FEATURES, timezone="Asia/Manila", **counts)
+    data_kind = "test_fixture" if any(r["trip"].upper().startswith(("SYNTHETIC", "TEST", "DEMO")) for r in rows) else "verified_observations"
+    metadata = dict(dataset_sha256=hashlib.sha256(csv_file.read_bytes()).hexdigest(), data_kind=data_kind, features=FEATURES, timezone="Asia/Manila", **counts)
     if len({r["trip"] for r in rows}) < 30 or len(rows) < 60 or counts["training_trips"] < 20 or counts["holdout_trips"] < 6:
         metrics = dict(status="insufficient_data", reason="Collect at least 60 GPS-verified observations from 30 complete distinct trips; at least 20 training and 6 future holdout trips must survive chronological purging.", **metadata)
         write_json(output / "metrics.json", metrics)
@@ -96,7 +97,9 @@ def train(csv_file, output, random_forest=False):
     routing = np.array([r["baseline"] for r in test_rows])
     served = np.where(supported, raw_predictions, routing)
     model_mae, routing_mae = float(mean_absolute_error(actual, served)), float(mean_absolute_error(actual, routing))
-    metrics = dict(status="evaluated", algorithm="LinearRegression", routing_mae_minutes=routing_mae, model_mae_minutes=model_mae, raw_model_mae_minutes=float(mean_absolute_error(actual, raw_predictions)), holdout_ai_coverage=float(supported.mean()), holdout_start=min(r["observed"] for r in test_rows).isoformat(), **metadata)
+    supported_trips = len({r["trip"] for r, ok in zip(test_rows, supported) if ok})
+    raw_mae = float(mean_absolute_error(actual, raw_predictions))
+    metrics = dict(status="evaluated", algorithm="LinearRegression", routing_mae_minutes=routing_mae, model_mae_minutes=model_mae, raw_model_mae_minutes=raw_mae, supported_holdout_trips=supported_trips, holdout_ai_coverage=float(supported.mean()), holdout_start=min(r["observed"] for r in test_rows).isoformat(), **metadata)
     metrics["per_trip"] = {}
     for trip in sorted({r["trip"] for r in test_rows}):
         mask = np.array([r["trip"] == trip for r in test_rows])
@@ -114,7 +117,9 @@ def train(csv_file, output, random_forest=False):
     exported = regression.intercept_ + ((x_test-scaler.mean_) / scaler.scale_) @ regression.coef_
     if not np.allclose(exported, raw_predictions, rtol=1e-10, atol=1e-10):
         raise ValueError("Exported inference does not match scikit-learn.")
-    artifact = dict(schema_version=1, eligible=bool(model_mae < routing_mae and supported.sum() >= 6), algorithm="LinearRegression", version="linear-"+metadata["dataset_sha256"][:12], features=FEATURES, timezone="Asia/Manila", coefficients=regression.coef_.tolist(), intercept=float(regression.intercept_), mean=scaler.mean_.tolist(), scale=scaler.scale_.tolist(), minimum=lower.tolist(), maximum=upper.tolist(), metrics={k: v for k, v in metrics.items() if k not in ("per_trip", "dataset_sha256")})
+    eligible = bool(data_kind == "verified_observations" and model_mae < routing_mae and raw_mae < routing_mae and supported_trips >= 6)
+    reason = "Evaluated linear model improves on the routing baseline." if eligible else "Software test fixture; never activate this artifact." if data_kind == "test_fixture" else "Model did not improve on routing or lacks supported predictions across six future test trips."
+    artifact = dict(schema_version=1, eligible=eligible, status="evaluated", reason=reason, data_kind=data_kind, dataset_sha256=metadata["dataset_sha256"], trained_at=datetime.now(timezone.utc).isoformat(), algorithm="LinearRegression", version="linear-"+metadata["dataset_sha256"][:12], features=FEATURES, timezone="Asia/Manila", coefficients=regression.coef_.tolist(), intercept=float(regression.intercept_), mean=scaler.mean_.tolist(), scale=scaler.scale_.tolist(), minimum=lower.tolist(), maximum=upper.tolist(), validation_cases=[dict(features=x_test[i].tolist(), expected_minutes=float(raw_predictions[i])) for i in np.flatnonzero(supported)[:5]], metrics={k: v for k, v in metrics.items() if k not in ("per_trip", "dataset_sha256")})
     metrics["eligible"] = artifact["eligible"]
     metrics["limitation"] = "A starter holdout is not a guarantee of accuracy. Review route/time coverage and later independent trips before deploying."
     write_json(output / "metrics.json", metrics)

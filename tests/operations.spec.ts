@@ -77,7 +77,14 @@ async function mockAccount(page: Page, role: 'admin' | 'employee' | 'user', assi
         requested_at: new Date().toISOString(),
       },
     ],
-    locations: [] as { trip_id: string; latitude: number; longitude: number; updated_at: string; accuracy_m?: number; speed_kmh?: number }[],
+    locations: [] as {
+      trip_id: string
+      latitude: number
+      longitude: number
+      updated_at: string
+      accuracy_m?: number
+      speed_kmh?: number
+    }[],
   }
   const audit: {
     id: number
@@ -279,6 +286,184 @@ test('passenger can find the ETA panel before choosing a pickup pin', async ({ p
     .evaluate((el) => el.getBoundingClientRect().top)
   expect(panelTop).toBeLessThan(mapTop)
   await noOverflow(page)
+})
+test('admin AI Status explains zero real data and demo exclusions without claiming model accuracy', async ({
+  page,
+}, info) => {
+  await mockAccount(page, 'admin')
+  await page.route('**/functions/v1/predict-eta', (r) => {
+    expect(r.request().postDataJSON()).toEqual({ action: 'status' })
+    return r.fulfill({
+      json: {
+        total_observations: 0,
+        verified_arrivals: 0,
+        completed_trips: 0,
+        incomplete_observations: 0,
+        rejected_checks: 2,
+        rejection_reasons: { bus_off_route: 2 },
+        model: {
+          status: 'untrained',
+          reason: 'No verified historical arrival dataset has been evaluated.',
+          version: null,
+          metrics: null,
+        },
+        requirements: {
+          minimum_observations: 60,
+          minimum_completed_trips: 30,
+          minimum_training_trips: 20,
+          minimum_holdout_trips: 6,
+        },
+        active_trips: [
+          {
+            trip_id: tripId,
+            bus: 'DEMO 002',
+            demo_data: true,
+            has_gps: true,
+            gps_updated_at: new Date().toISOString(),
+            gps_accuracy_m: 3,
+            open_requests: 1,
+            collection: null,
+          },
+        ],
+      },
+    })
+  })
+  await page.goto('/admin?tab=ai')
+  const panel = page.getByRole('region', { name: 'Admin AI Status' })
+  await expect(panel).toContainText('Model: untrained')
+  await expect(panel).toContainText('Completed trips with usable samples')
+  await expect(panel).toContainText('60 verified observations from 30 completed real trips')
+  await expect(panel).toContainText('excluded from real training')
+  await expect(panel).toContainText('No collection check received')
+  await expect(panel).not.toContainText('Latest chronological evaluation')
+  await noOverflow(page)
+  await panel.screenshot({ path: `.artifacts/ai-status-${info.project.name}.png` })
+})
+test('employee route diagnostics show bus GPS and selected pickup together with separate offset reasons', async ({
+  page,
+}, info) => {
+  const records = await mockAccount(page, 'employee')
+  await page.route('**/functions/v1/predict-eta', (r) => {
+    const body = r.request().postDataJSON()
+    expect(body.action).toBe('diagnose')
+    return r.fulfill({
+      json: {
+        status: 'bus_off_route',
+        message: 'Reported bus GPS is 167 m from the road path; the 150 m limit remains enforced.',
+        route_source: 'router_suggestion',
+        route_path: records.routes[0].road_path,
+        location: {
+          trip_id: tripId,
+          latitude: 13.222,
+          longitude: 120.591,
+          accuracy_m: 3,
+          speed_kmh: 0,
+          course_degrees: null,
+          updated_at: new Date().toISOString(),
+        },
+        diagnostics: {
+          bus_offset_m: 167,
+          pickup_offset_m: body.pickup_latitude ? 55 : null,
+          corridor_limit_m: 150,
+        },
+        route: records.routes[0],
+      },
+    })
+  })
+  await page.goto('/employee?tab=diagnostics')
+  const panel = page.getByRole('region', { name: 'Route and GPS diagnostics' })
+  await expect(panel).toContainText('167 m')
+  await expect(panel.getByTitle('Reported bus GPS', { exact: true })).toBeVisible()
+  await panel
+    .getByLabel('Assigned passenger pickup')
+    .selectOption('00000000-0000-4000-8000-000000000050')
+  await expect(panel.getByTitle('Your selected pickup pin', { exact: true })).toBeVisible()
+  await expect(panel).toContainText('55 m')
+  await expect(panel.getByTitle('Assigned route origin', { exact: true })).toBeVisible()
+  await noOverflow(page)
+  await panel.screenshot({ path: `.artifacts/route-diagnostics-${info.project.name}.png` })
+})
+test('passenger sees the generated road path and actual bus GPS even when a mismatch prevents ETA', async ({
+  page,
+  context,
+}) => {
+  const records = await mockAccount(page, 'user')
+  records.routes[0].road_path = null
+  const updated = new Date().toISOString()
+  records.locations.push({
+    trip_id: tripId,
+    latitude: 13.222,
+    longitude: 120.591,
+    accuracy_m: 3,
+    updated_at: updated,
+  })
+  await page.route('https://photon.komoot.io/**', (r) => r.fulfill({ json: { features: [] } }))
+  await page.route('**/functions/v1/predict-eta', (r) =>
+    r.fulfill({
+      json: {
+        status: 'bus_off_route',
+        source: 'approximate',
+        minutes: null,
+        road_distance_m: null,
+        message: 'Reported bus GPS is 167 m from the assigned road path.',
+        location_updated_at: updated,
+        diagnostics: { bus_offset_m: 167, pickup_offset_m: 55, corridor_limit_m: 150 },
+        route_path: [
+          [13.22, 120.59],
+          [13.225, 120.595],
+          [13.23, 120.6],
+        ],
+      },
+    }),
+  )
+  await context.grantPermissions(['geolocation'])
+  await context.setGeolocation({ latitude: 13.225, longitude: 120.595, accuracy: 8 })
+  await page.goto(`/map?trip=${tripId}&pickup=1`)
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('region', { name: 'Pickup arrival estimate' })).toContainText(
+    '167 m',
+  )
+  await expect(dialog.getByTitle('Reported bus GPS', { exact: true })).toBeVisible()
+  await expect(dialog.getByTitle('Your selected pickup pin', { exact: true })).toBeVisible()
+  expect(
+    await dialog.locator('.pickup-location-map path.leaflet-interactive').count(),
+  ).toBeGreaterThan(0)
+})
+test('operator can route through a chosen road waypoint and must review the new path', async ({
+  page,
+}) => {
+  const records = await mockAccount(page, 'admin')
+  records.routes[0].road_path = null
+  records.routes[0].is_approved = false
+  let points: number[][] = []
+  await page.route('https://router.project-osrm.org/**', (r) => {
+    points = new URL(r.request().url()).pathname
+      .split('/')
+      .at(-1)!
+      .split(';')
+      .map((point) => point.split(',').map(Number))
+    return r.fulfill({
+      json: {
+        code: 'Ok',
+        routes: [{ distance: 1500, duration: 200, geometry: { coordinates: points } }],
+      },
+    })
+  })
+  await page.goto('/admin?tab=routes')
+  await page.getByRole('button', { name: 'Edit route TEST route', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'Choose road waypoint', exact: true }).click()
+  await dialog.locator('.route-review-map').click({ position: { x: 150, y: 140 } })
+  await expect(dialog.getByTitle('Road waypoint 1')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Preview road route', exact: true }).click()
+  const approval = dialog.getByRole('checkbox', {
+    name: 'Operator verified this road path for bus service',
+  })
+  await expect(approval).toBeEnabled()
+  await expect(approval).not.toBeChecked()
+  expect(points).toHaveLength(3)
+  expect(points[0]).toEqual([120.59, 13.22])
+  expect(points[2]).toEqual([120.6, 13.23])
 })
 for (const source of ['approximate', 'ai'] as const) {
   test(`pickup shows ${source} ETA and road distance without submitting a request`, async ({

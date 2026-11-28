@@ -15,7 +15,7 @@ The existing map, passenger pin selector, six core tables, and driver GPS contro
 | `src/features/pickups/PickupSelector.tsx` | Shows ETA for the selected pin and captures an observation after request confirmation. |
 | `src/hooks/useLocationSharing.ts` | Keeps publishing GPS and attempts collection once per minute while sharing. |
 | `scripts/ai/train.py`, `requirements.txt`, `export-samples.sql` | Real data export, chronological training, MAE evaluation and inference artifact export. |
-| `scripts/ai/evaluation-status.json` | Actual result of running against the header-only template: insufficient data, zero observations, no accuracy claim. |
+| `scripts/ai/evaluation-status.json` | Latest result from the actual live verified/completed/non-demo export: insufficient data, zero observations, no accuracy claim. |
 | `src/features/eta/eta.test.ts`, `scripts/test-eta-training.mjs`, `scripts/ai/test_train.py`, `tests/operations.spec.ts` | ETA behavior, real PostgreSQL security/arrival checks, pipeline checks and desktop/mobile UI checks. |
 
 ## Routing and approach detection
@@ -38,15 +38,18 @@ These per-client/per-isolate limits suit initial use. A busy deployment should u
 
 Only server-side routing code can call `record_eta_sample`. It checks the request remains pending/accepted, the trip remains active and the observed timestamp still exactly matches the latest GPS. Training requires accuracy within 25 m, a target more than 100 m away, positive valid routing features and at most one observation per request per minute. A row lock prevents a late insert racing with a GPS arrival update. GPS with 25–100 m accuracy may support an approximate display but cannot produce training observations.
 
-The assigned driver's sharing page collects for open requests once per minute, independently of whether the passenger stays online. Each invocation handles up to 20 requests, oldest first. Larger fleets need background/batched collection before treating their data as representative. A confirmed passenger request also attempts an immediate initial sample; if the previous bus fix predates the request, it waits for a new fix. Routing/collection failure never stops GPS sharing or pickup submission.
+The assigned driver's sharing page collects for open requests once per minute, independently of whether the passenger stays online. Each invocation handles up to eight requests in pairs, rotating by last attempted collection. Overlapping client collections are prevented. A confirmed passenger request also attempts an immediate initial sample; if the previous bus fix predates the request, it waits for a new fix. Routing/collection failure never stops GPS sharing or pickup submission. Service writes return recorded/skipped/throttled results; only actual inserts count as recorded observations. Demo/test vehicles are excluded from real training.
 
-Actual arrival requires two successive accurate GPS reports within 50 m of the pickup, with at least five seconds between the first candidate and confirming report, and no reporting gap longer than 90 seconds. The first qualifying timestamp becomes `actual_arrival_at`; remaining minutes are computed from timestamps. This verifies arrival near the pin, not boarding. Acceptance is never an arrival event. If GPS becomes unreliable, jumps implausibly, loses continuity, the request is cancelled/rejected, or the trip ends without verification, ignore/discard the incomplete sample. A fast pass without sufficient GPS evidence stays unlabelled. This conservative rule may omit trips with poor GPS reception; account for that coverage bias during evaluation.
+Actual arrival requires two successive accurate GPS reports within 50 m of the pickup, with at least five seconds between the first candidate and confirming report, and no reporting gap longer than 90 seconds. The first qualifying timestamp becomes `actual_arrival_at`; remaining minutes are computed from timestamps. This verifies arrival near the pin, not boarding. Acceptance is never an arrival event. GPS gaps, implausible jumps, closed requests and ended trips mark incomplete samples rejected with a reason. Intermediate 25–100 m accuracy fixes reset the arrival candidate but do not destroy a valid earlier observation; arrival still requires consecutive fixes within 25 m accuracy. A fast pass without sufficient GPS evidence stays unlabelled. Account for this GPS coverage bias during evaluation.
 
-Completed labels survive trip completion and schedule archiving. Incomplete samples older than 12 hours are removed on the next report for that trip. For abandoned active trips with no further GPS, an operator can periodically execute:
+Completed labels survive trip completion and schedule archiving. Old incomplete observations become rejected on the next GPS report. For abandoned trips, a trusted operator can expire pending observations and erase unneeded old rejection correlations while preserving aggregate diagnostics:
 
 ```sql
-delete from public.eta_training_samples
-where actual_arrival_at is null and observed_at < now() - interval '12 hours';
+update public.eta_training_samples
+set sample_state='rejected',rejection_reason='observation_expired',arrival_candidate_at=null
+where sample_state='pending' and observed_at < now() - interval '12 hours';
+update public.eta_training_samples set request_id=null
+where sample_state='rejected' and attempted_at < now() - interval '30 days';
 ```
 
 RLS allows active Admins to read training samples, and only trusted server/service-role code to write. Passengers, guests and employees cannot read the training dataset or forge labels. Existing pickup-coordinate RLS continues to restrict access to the request owner and assigned employee. Internal trigger functions have fixed search paths and no browser execution grants. The context RPC returns public route/location data only, excluding private trip fields.
@@ -99,11 +102,11 @@ The initial experiment requires at least 60 valid observations from 30 distinct 
 
 With enough data, outputs go to ignored `.artifacts/eta-model/`: `model.joblib`, `model.json`, `metrics.json` and `holdout-predictions.csv`. Metrics report MAE in minutes for routing, raw linear predictions and the actual serving rule, including out-of-range fallback; AI coverage and per-trip errors are included. Optional Random Forest outputs an additional trusted local artifact and MAE. It cannot run through linear TypeScript inference; substantial improvement is a reason to evaluate another future holdout and build a private Python service.
 
-With insufficient data, the script exits **2** and writes only an explicit untrained JSON artifact and insufficient-data metrics. It makes no accuracy claim. The checked-in evaluation status was generated using the empty template, not an audit of hosted trips.
+With insufficient data, the script exits **2** and writes only an explicit untrained JSON artifact and insufficient-data metrics. It makes no accuracy claim. The latest checked-in evaluation status was generated from the actual hosted verified/completed/non-demo export, which contained zero rows.
 
 The linear JSON includes feature order, timezone, scaling, coefficients, training feature bounds, version and holdout metrics. Training verifies exported predictions match the Python pipeline. Inference requires matching schema/features, valid finite parameters, an eligible artifact and holdout improvement over routing. Inputs outside training bounds or unsafe predictions fall back to routing. A stopped bus uses routing with the unknown waiting-time message.
 
-After reviewing real results, route/time coverage, MAE and predictions against an independent later set of actual arrivals, copy only the approved JSON to `supabase/functions/predict-eta/model.json` and redeploy `predict-eta`. The web app never downloads the Python model or receives service credentials. Restore the checked-in untrained artifact and redeploy to return to routing-only behavior. Do not activate solely because an experiment beats the baseline on a small holdout.
+After reviewing real results, route/time coverage, MAE and predictions against independent later arrivals, use `scripts/ai/activate-model.ts` to validate the eligible artifact and its exported Python/TypeScript parity cases before replacing the bundled JSON and redeploying. It rejects test-fixture artifacts, inadequate holdout coverage and models that do not improve on routing. See [the completion audit and field guide](ai-completion.md). The web app never downloads Python artifacts or receives service credentials.
 
 ## Verification and field testing
 

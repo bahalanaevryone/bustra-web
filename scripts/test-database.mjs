@@ -6,6 +6,7 @@ import { testPassengerPickups } from './test-passenger-pickups.mjs'
 import { testRoleManagement } from './test-role-management.mjs'
 import { testScheduleArchive } from './test-schedule-archive.mjs'
 import { testEtaTraining } from './test-eta-training.mjs'
+import { testEtaDiagnostics } from './test-eta-diagnostics.mjs'
 
 const db = new PGlite()
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -104,7 +105,8 @@ try {
         !file.includes('dynamic_passenger_pickups') &&
         !file.includes('complete_user_role_management') &&
         !file.includes('archive_completed_schedules') &&
-        !file.includes('eta_training_samples'),
+        !file.includes('eta_training_samples') &&
+        !file.includes('eta_diagnostics_and_collection'),
     )
     .sort()) {
     const migration = await readFile(
@@ -834,6 +836,20 @@ try {
   })
   await testScheduleArchive({ db, test, as, value, denied, admin, passenger, driver, trip })
   await testEtaTraining({ db, test, as, value, denied, admin, passenger, driver, trip, route, bus })
+  await testEtaDiagnostics({
+    db,
+    test,
+    as,
+    value,
+    denied,
+    admin,
+    passenger,
+    driver,
+    otherDriver,
+    trip,
+    route,
+    bus,
+  })
   console.log(
     `\n${passed} PostgreSQL security and integrity checks passed. Hosted Supabase and concurrent multi-connection load are separate checks.`,
   )

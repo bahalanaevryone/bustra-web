@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   approach,
+  assignedRoadPath,
   checkFix,
   estimate,
   features,
@@ -9,6 +10,7 @@ import {
   modelPrediction,
   project,
   roadRoute,
+  routeDiagnostics,
 } from '../../../supabase/functions/_shared/eta'
 import type { Fix, Point } from '../../../supabase/functions/_shared/eta'
 
@@ -71,8 +73,47 @@ describe('GPS and direction safeguards', () => {
       expect(() => checkFix(f, now)).toThrow()
   })
   it('rejects a pin off the actual road path and ambiguous overlapping loops', () => {
-    expect(() => approach(fix, [13.225, 120.61], path)).toThrow('too far')
+    expect(() => approach(fix, [13.225, 120.61], path)).toThrow('Your pickup pin is')
     expect(() => project([13.21, 120.6], [...path, ...path.slice().reverse()])).toThrow('loop')
+  })
+})
+describe('route mismatch diagnostics', () => {
+  it('distinguishes bus GPS errors from pickup pin errors without widening the corridor', () => {
+    const badBus = { ...fix, longitude: 120.602 }
+    expect(() => approach(badBus, pin, path)).toThrow('reported bus GPS')
+    const diagnostics = routeDiagnostics(badBus, pin, path)
+    expect(diagnostics.bus_offset_m).toBeGreaterThan(150)
+    expect(diagnostics.pickup_offset_m).toBe(0)
+    expect(diagnostics.corridor_limit_m).toBe(150)
+  })
+  it('refuses reversed/moved endpoint geometry instead of silently replacing it', async () => {
+    const route = {
+      origin_lat: 13.2,
+      origin_lng: 120.6,
+      destination_lat: 13.23,
+      destination_lng: 120.6,
+      road_path: [...path].reverse(),
+    }
+    await expect(assignedRoadPath(route, router)).rejects.toThrow('does not start/end')
+    expect(
+      (await assignedRoadPath({ ...route, road_path: path, is_approved: true }, router)).source,
+    ).toBe('stored_reviewed')
+  })
+  it('identifies a generated suggestion when no stored path exists and validates latitude ordering', async () => {
+    expect(
+      (
+        await assignedRoadPath(
+          { origin_lat: 13.2, origin_lng: 120.6, destination_lat: 13.23, destination_lng: 120.6 },
+          router,
+        )
+      ).source,
+    ).toBe('router_suggestion')
+    await expect(
+      assignedRoadPath(
+        { origin_lat: 120.6, origin_lng: 13.2, destination_lat: 120.6, destination_lng: 13.23 },
+        router,
+      ),
+    ).rejects.toThrow('latitude')
   })
 })
 describe('road estimates and inference fallback', () => {

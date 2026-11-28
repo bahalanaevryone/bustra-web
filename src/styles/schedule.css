@@ -378,6 +378,35 @@
   font-size: 1.5rem;
   font-weight: 700;
 }
+.eta-admin-panel {
+  margin-bottom: 24px;
+}
+.eta-admin-content {
+  padding: 20px;
+}
+.eta-admin-content > p,
+.eta-admin-content > .notice {
+  margin-bottom: 16px;
+}
+.eta-diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.eta-diagnostics-grid dt {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+.eta-diagnostics-grid dd {
+  margin: 4px 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.eta-trip-health {
+  padding: 12px 0;
+  border-bottom: 1px solid #dbe4e0;
+}
 .pickup-selector .inline-actions {
   flex-wrap: wrap;
   gap: 8px;
