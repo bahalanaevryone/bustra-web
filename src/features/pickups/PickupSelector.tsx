@@ -9,6 +9,8 @@ import { rpc } from '../../lib/supabase/client'
 import { errorMessage } from '../../lib/utils'
 import { reverseLocation } from '../schedules/geocoding'
 import { PickupMap } from './PickupMap'
+import { EtaPanel } from '../eta/EtaPanel'
+import { requireClient } from '../../lib/supabase/client'
 import '../../styles/schedule.css'
 
 interface Assessment {
@@ -152,6 +154,13 @@ export function PickupSelector({
         p_longitude: pin[1],
         p_address: address.trim() || null,
       })
+      // Capture the initial routing features after confirmation, while the request exists.
+      void requireClient()
+        .functions.invoke('predict-eta', {
+          body: { trip_id: tripId, pickup_latitude: pin[0], pickup_longitude: pin[1] },
+          signal: AbortSignal.timeout(15000),
+        })
+        .catch(() => undefined)
       onSent()
     } catch (e) {
       setError(errorMessage(e))
@@ -165,6 +174,7 @@ export function PickupSelector({
         <strong>Selected bus: {busLabel}</strong>
       </p>
       <p>{route?.route_name}</p>
+      <EtaPanel tripId={tripId} pin={pin} />
       <div className="inline-actions">
         <button
           className="button button-outline button-small"
@@ -238,8 +248,9 @@ export function PickupSelector({
       )}
       {error && <Notice tone="error">{error}</Notice>}
       <p className="form-help">
-        Only this confirmed position is sent. Your account and assigned driver can view it. Your
-        movements are not tracked. View responses in <Link to="/requests">My requests</Link>.
+        Choosing a pin uses it to calculate road travel time. Confirming saves the pickup request
+        for you and your assigned driver. Your movements are not tracked. View responses in{' '}
+        <Link to="/requests">My requests</Link>.
       </p>
       <div className="modal-actions">
         <button className="button button-outline" disabled={busy} onClick={onBack}>
@@ -250,7 +261,7 @@ export function PickupSelector({
           disabled={busy || !pin || !confirmed || !current?.result?.can_request}
           onClick={() => void submit()}
         >
-          {busy ? 'Sending...' : 'Confirm Pickup Request'}
+          {busy ? 'Sending...' : 'Request Pickup'}
         </button>
       </div>
     </div>

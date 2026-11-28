@@ -77,7 +77,7 @@ async function mockAccount(page: Page, role: 'admin' | 'employee' | 'user', assi
         requested_at: new Date().toISOString(),
       },
     ],
-    locations: [] as { trip_id: string; latitude: number; longitude: number; updated_at: string }[],
+    locations: [] as { trip_id: string; latitude: number; longitude: number; updated_at: string; accuracy_m?: number; speed_kmh?: number }[],
   }
   const audit: {
     id: number
@@ -263,6 +263,164 @@ async function noOverflow(page: Page) {
     true,
   )
 }
+test('passenger can find the ETA panel before choosing a pickup pin', async ({ page }) => {
+  await mockAccount(page, 'user')
+  await page.goto(`/map?trip=${tripId}`)
+  await expect(page.getByRole('region', { name: 'Pickup arrival estimate' })).toBeVisible()
+  await page.getByRole('button', { name: 'View pickup ETA', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  const panel = dialog.getByRole('region', { name: 'Pickup arrival estimate' })
+  await expect(panel).toBeInViewport()
+  await expect(panel).toContainText('Approximate ETA')
+  await expect(panel).toContainText('Choose a pickup pin')
+  const panelTop = await panel.evaluate((el) => el.getBoundingClientRect().top)
+  const mapTop = await dialog
+    .locator('.pickup-location-map')
+    .evaluate((el) => el.getBoundingClientRect().top)
+  expect(panelTop).toBeLessThan(mapTop)
+  await noOverflow(page)
+})
+for (const source of ['approximate', 'ai'] as const) {
+  test(`pickup shows ${source} ETA and road distance without submitting a request`, async ({
+    page,
+    context,
+  }, info) => {
+    const records = await mockAccount(page, 'user')
+    const updated = new Date().toISOString()
+    records.locations.push({
+      trip_id: tripId,
+      latitude: 13.22,
+      longitude: 120.59,
+      updated_at: updated,
+      accuracy_m: 10,
+      speed_kmh: 30,
+    })
+    await page.route('https://photon.komoot.io/**', (r) => r.fulfill({ json: { features: [] } }))
+    let calls = 0
+    await page.route('**/functions/v1/predict-eta', (r) => {
+      calls++
+      expect(r.request().postDataJSON()).toMatchObject({
+        trip_id: tripId,
+        pickup_latitude: 13.225,
+        pickup_longitude: 120.595,
+      })
+      return r.fulfill({
+        json: {
+          status: 'ok',
+          source,
+          minutes: 7.25,
+          road_distance_m: 3500,
+          location_updated_at: updated,
+          message: 'Test routing response.',
+        },
+      })
+    })
+    await context.grantPermissions(['geolocation'])
+    await context.setGeolocation({ latitude: 13.225, longitude: 120.595, accuracy: 8 })
+    await page.goto(`/map?trip=${tripId}&pickup=1`)
+    const panel = page.getByRole('region', { name: 'Pickup arrival estimate' })
+    await expect(panel).toContainText(source === 'ai' ? 'AI-predicted ETA' : 'Approximate ETA')
+    await expect(panel).toContainText('8 min')
+    await expect(panel).toContainText('3.50 km')
+    await expect(panel).toContainText('Last location update:')
+    await expect(
+      page.getByRole('dialog').getByRole('button', { name: 'Request Pickup', exact: true }),
+    ).toBeDisabled()
+    expect(calls).toBe(1)
+    await noOverflow(page)
+    await page
+      .getByRole('dialog')
+      .screenshot({ path: `.artifacts/eta-${source}-${info.project.name}.png` })
+  })
+}
+test('pickup handles ETA network errors and stops showing estimates when offline', async ({
+  page,
+  context,
+}) => {
+  const records = await mockAccount(page, 'user')
+  records.locations.push({
+    trip_id: tripId,
+    latitude: 13.22,
+    longitude: 120.59,
+    updated_at: new Date().toISOString(),
+    accuracy_m: 10,
+  })
+  await page.route('https://photon.komoot.io/**', (r) => r.fulfill({ json: { features: [] } }))
+  await page.route('**/functions/v1/predict-eta', (r) => r.abort('failed'))
+  await context.grantPermissions(['geolocation'])
+  await context.setGeolocation({ latitude: 13.225, longitude: 120.595, accuracy: 8 })
+  await page.goto(`/map?trip=${tripId}&pickup=1`)
+  const panel = page.getByRole('region', { name: 'Pickup arrival estimate' })
+  await expect(panel).toContainText('Check your connection')
+  await context.setOffline(true)
+  await expect(panel).toContainText('You are offline')
+  await expect(panel).not.toContainText(' km')
+})
+test('ETA refresh keeps a slow in-flight prediction and avoids overlapping requests', async ({
+  page,
+  context,
+}) => {
+  const records = await mockAccount(page, 'user')
+  const updated = new Date().toISOString()
+  records.locations.push({
+    trip_id: tripId,
+    latitude: 13.22,
+    longitude: 120.59,
+    updated_at: updated,
+    accuracy_m: 10,
+  })
+  await page.clock.install()
+  await page.route('https://photon.komoot.io/**', (r) => r.fulfill({ json: { features: [] } }))
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let calls = 0
+  await page.route('**/functions/v1/predict-eta', async (r) => {
+    calls++
+    await held
+    await r.fulfill({
+      json: {
+        status: 'ok',
+        source: 'approximate',
+        minutes: 7,
+        road_distance_m: 3000,
+        location_updated_at: updated,
+        message: 'Test response.',
+      },
+    })
+  })
+  await context.grantPermissions(['geolocation'])
+  await context.setGeolocation({ latitude: 13.225, longitude: 120.595, accuracy: 8 })
+  await page.goto(`/map?trip=${tripId}&pickup=1`)
+  await expect.poll(() => calls).toBe(1)
+  await page.clock.fastForward(16000)
+  expect(calls).toBe(1)
+  release()
+  await expect(page.getByRole('region', { name: 'Pickup arrival estimate' })).toContainText('7 min')
+})
+test('pickup refuses stale GPS without requesting an ETA', async ({ page, context }) => {
+  const records = await mockAccount(page, 'user')
+  records.locations.push({
+    trip_id: tripId,
+    latitude: 13.22,
+    longitude: 120.59,
+    updated_at: new Date(Date.now() - 120000).toISOString(),
+    accuracy_m: 10,
+  })
+  await page.route('https://photon.komoot.io/**', (r) => r.fulfill({ json: { features: [] } }))
+  let calls = 0
+  await page.route('**/functions/v1/predict-eta', (r) => {
+    calls++
+    return r.fulfill({ json: {} })
+  })
+  await context.grantPermissions(['geolocation'])
+  await context.setGeolocation({ latitude: 13.225, longitude: 120.595, accuracy: 8 })
+  await page.goto(`/map?trip=${tripId}&pickup=1`)
+  const panel = page.getByRole('region', { name: 'Pickup arrival estimate' })
+  await expect(panel).toContainText('outdated')
+  expect(calls).toBe(0)
+})
 async function tab(page: Page, name: string) {
   const menu = page.getByRole('button', { name: 'Toggle dashboard navigation' })
   if (await menu.isVisible()) await menu.click()
@@ -736,7 +894,7 @@ test('passenger submits a manually adjusted pin with GPS denied and no stop cata
   await page.goto(`/map?trip=${tripId}`)
   await page.getByRole('button', { name: 'Request Pickup', exact: true }).click()
   const dialog = page.getByRole('dialog')
-  const confirm = dialog.getByRole('button', { name: 'Confirm Pickup Request' })
+  const confirm = dialog.getByRole('button', { name: 'Request Pickup' })
   await expect(confirm).toBeDisabled()
   await dialog.getByRole('button', { name: 'Use My Current Location', exact: true }).click()
   await expect(dialog.getByText(/Location permission denied/)).toBeVisible()
@@ -783,7 +941,7 @@ test('passenger GPS pin is shown once, can be adjusted, and requires confirmatio
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByText('Pickup: 13.225000, 120.595000')).toBeVisible()
   await expect(dialog.getByText(/Device accuracy:.*8 m/)).toBeVisible()
-  await expect(dialog.getByRole('button', { name: 'Confirm Pickup Request' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Request Pickup' })).toBeDisabled()
   await expect(dialog.getByText(/operator-reviewed road path/)).toBeVisible()
   await noOverflow(page)
   await dialog.screenshot({ path: `.artifacts/pickup-gps-${info.project.name}.png` })
@@ -804,7 +962,7 @@ test('too-far assessment and request errors keep the chosen pin without claiming
   await dialog.locator('.pickup-location-map').click({ position: { x: 160, y: 130 } })
   await expect(dialog.getByRole('alert')).toContainText('within 500 metres')
   await dialog.getByRole('checkbox', { name: /I confirm this pickup pin/ }).check()
-  await expect(dialog.getByRole('button', { name: 'Confirm Pickup Request' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Request Pickup' })).toBeDisabled()
   await page.route('**/rpc/check_pickup_location', (route) =>
     route.fulfill({ json: { verification: 'unverified', distance_m: null, can_request: true } }),
   )
@@ -814,7 +972,7 @@ test('too-far assessment and request errors keep the chosen pin without claiming
     route.fulfill({ status: 400, json: { message: 'This bus is currently full.' } }),
   )
   await dialog.getByRole('checkbox', { name: /I confirm this pickup pin/ }).check()
-  await dialog.getByRole('button', { name: 'Confirm Pickup Request' }).click()
+  await dialog.getByRole('button', { name: 'Request Pickup' }).click()
   await expect(dialog.getByRole('alert')).toContainText('currently full')
   await expect(dialog.getByTitle('Your selected pickup pin', { exact: true })).toBeVisible()
 })

@@ -1,0 +1,4 @@
+project_id = "bustra-web"
+
+[functions.predict-eta]
+verify_jwt = true

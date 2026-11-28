@@ -363,6 +363,21 @@
 .pickup-selector {
   min-width: 0;
 }
+.eta-panel {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--border, #dbe4e0);
+  border-radius: 12px;
+  background: var(--surface, #f5f9f7);
+  overflow-wrap: anywhere;
+}
+.eta-panel p {
+  margin: 6px 0;
+}
+.eta-panel .eta-minutes {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
 .pickup-selector .inline-actions {
   flex-wrap: wrap;
   gap: 8px;

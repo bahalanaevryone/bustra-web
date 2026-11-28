@@ -7,6 +7,12 @@ for (const [name, path, options, expectDenied] of [
   ['Auth settings', '/auth/v1/settings', {}],
   ['Public service feed', '/rest/v1/rpc/public_feed', { method: 'POST', body: '{}' }],
   [
+    'Pickup ETA API schema',
+    '/rest/v1/rpc/eta_context',
+    { method: 'POST', body: JSON.stringify({ p_trip: '00000000-0000-4000-8000-000000000000' }) },
+    true,
+  ],
+  [
     'Admin role API schema',
     '/rest/v1/rpc/admin_update_user',
     {

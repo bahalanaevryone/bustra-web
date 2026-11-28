@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { rpc } from '../lib/supabase/client'
 import { errorMessage } from '../lib/utils'
+import { collectEtaObservations } from '../features/eta/collect'
 export function useLocationSharing(tripId: string | undefined, allowed: boolean) {
   const watch = useRef<number | null>(null)
   const [sharing, setSharing] = useState(false)
@@ -50,6 +51,7 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
     if (watch.current !== null) return
     const currentGeneration = ++generation.current
     let lastWrite = 0
+    let lastCollection = 0
     let writing = false
     let lastCoords: [number, number] | null = null
     setSharing(true)
@@ -89,6 +91,10 @@ export function useLocationSharing(tripId: string | undefined, allowed: boolean)
           if (currentGeneration !== generation.current) return
           lastWrite = Date.now()
           lastCoords = [latitude, longitude]
+          if (tripId && Date.now() - lastCollection >= 60000) {
+            lastCollection = Date.now()
+            void collectEtaObservations(tripId)
+          }
           setLastUpdate(new Date().toISOString())
           setStatus(`Sharing location · accuracy ±${Math.round(accuracy)} m`)
         } catch (e) {

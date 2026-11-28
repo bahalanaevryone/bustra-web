@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "eligible": false,
+  "status": "untrained",
+  "reason": "No verified historical arrival dataset has been evaluated. Routing fallback remains active."
+}

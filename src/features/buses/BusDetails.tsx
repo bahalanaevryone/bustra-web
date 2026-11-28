@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { isFresh, locationAge, time } from '../../lib/utils'
 import { Modal, Notice, Status } from '../../components/ui'
 import { PickupSelector } from '../pickups/PickupSelector'
+import { EtaPanel } from '../eta/EtaPanel'
 
 export function BusDetails({
   tripId,
@@ -86,9 +87,17 @@ export function BusDetails({
         {location && !isFresh(location.updated_at) && !demo && ' · Current position is unknown.'}
       </Notice>
       <p className="muted">
-        ETA unavailable · Road travel data is not configured. AI prediction is planned / not
-        trained.
+        Choose a pickup location to see its arrival estimate and remaining road distance.
       </p>
+      <EtaPanel tripId={tripId} pin={null} />
+      <button
+        className="button button-outline full-width"
+        disabled={demo || trip.status !== 'active' || (!!user && profile?.role !== 'user')}
+        onClick={request}
+      >
+        <Clock size={18} />
+        {user ? 'View pickup ETA' : 'Log in to view pickup ETA'}
+      </button>
       {success ? (
         <Notice tone="success">
           Request sent. Track the response in{' '}
